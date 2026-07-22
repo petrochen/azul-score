@@ -1,6 +1,6 @@
 # Мастер-план: игра Azul против бота
 
-Статус: draft · Владелец: @petrochen · Процесс: [specs/README.md](README.md)
+Статус: approved (владельцем 2026-07-22) · Владелец: @petrochen · Процесс: [specs/README.md](README.md)
 
 ## Что строим
 
