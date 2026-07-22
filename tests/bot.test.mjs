@@ -246,7 +246,7 @@ test('chooseMove does not mutate the passed state, including rngState (INV-1)', 
 
 test('unknown level throws an Error with code BAD_LEVEL', () => {
   const s = newGame(1);
-  for (const level of [2, -1, 0.5, '1', undefined, null, NaN]) {
+  for (const level of [9, -1, 0.5, '1', undefined, null, NaN]) {
     assert.throws(
       () => chooseMove(s, { level, seed: 1 }),
       (e) => e instanceof Error && e.code === 'BAD_LEVEL',
