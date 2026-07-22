@@ -1,0 +1,1172 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Azul: правила игры, ведение счёта партии по раундам и проверка итогового счёта — точный минимум и максимум для конфигурации стены.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔷</text></svg>">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  button { font: inherit; }
+</style>
+<title>Azul — проверка счёта</title>
+<style>
+  :root {
+    --ground: #ede4d3;
+    --panel: #f7f1e4;
+    --panel-edge: #d8cdb6;
+    --cell-ground: #e6dcc8;
+    --ink: #322f28;
+    --muted: #7d7563;
+    --accent: #2f5fa8;
+    --accent-ink: #24497f;
+    --on-accent: #ffffff;
+    --good: #2e6b40; --good-bg: #e3eedd;
+    --warn: #8a6114; --warn-bg: #f2e8cd;
+    --bad:  #a33325; --bad-bg:  #f2ded7;
+    --tile-shadow: 0 2px 5px rgba(60, 45, 20, .30), 0 1px 1px rgba(60,45,20,.2);
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: "Avenir Next", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #191d26;
+      --panel: #222735;
+      --panel-edge: #39415455;
+      --cell-ground: #1d222e;
+      --ink: #e7e2d6;
+      --muted: #99a0b1;
+      --accent: #7ba3dd;
+      --accent-ink: #a8c4ec;
+      --on-accent: #14202f;
+      --good: #85c493; --good-bg: #223227;
+      --warn: #d9ac4f; --warn-bg: #362f1c;
+      --bad:  #e28a77; --bad-bg:  #3a2520;
+      --tile-shadow: 0 2px 6px rgba(0,0,0,.5), 0 1px 1px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #ede4d3; --panel: #f7f1e4; --panel-edge: #d8cdb6; --cell-ground: #e6dcc8;
+    --ink: #322f28; --muted: #7d7563; --accent: #2f5fa8; --accent-ink: #24497f; --on-accent: #ffffff;
+    --good: #2e6b40; --good-bg: #e3eedd; --warn: #8a6114; --warn-bg: #f2e8cd;
+    --bad: #a33325; --bad-bg: #f2ded7;
+    --tile-shadow: 0 2px 5px rgba(60,45,20,.30), 0 1px 1px rgba(60,45,20,.2);
+  }
+  :root[data-theme="dark"] {
+    --ground: #191d26; --panel: #222735; --panel-edge: #39415455; --cell-ground: #1d222e;
+    --ink: #e7e2d6; --muted: #99a0b1; --accent: #7ba3dd; --accent-ink: #a8c4ec; --on-accent: #14202f;
+    --good: #85c493; --good-bg: #223227; --warn: #d9ac4f; --warn-bg: #362f1c;
+    --bad: #e28a77; --bad-bg: #3a2520;
+    --tile-shadow: 0 2px 6px rgba(0,0,0,.5), 0 1px 1px rgba(0,0,0,.4);
+  }
+
+  [hidden] { display: none !important; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.5;
+    padding: 28px 20px 64px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+
+  header.top { margin-bottom: 20px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600;
+  }
+  h1 {
+    font-family: var(--serif); font-weight: 600;
+    font-size: clamp(24px, 4.5vw, 36px); line-height: 1.15;
+    margin: 6px 0 8px; text-wrap: balance;
+  }
+  .sub { color: var(--muted); max-width: 58ch; margin: 0; }
+
+  .tabs {
+    display: inline-flex; gap: 2px; padding: 3px;
+    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 10px;
+    margin-top: 16px;
+  }
+  .tab {
+    font: 600 13px/1.2 var(--sans); color: var(--muted);
+    background: transparent; border: none; border-radius: 7px;
+    padding: 8px 14px; cursor: pointer;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .tab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); }
+  .tab:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- Live sticky bar ---------- */
+  .livebar {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    background: color-mix(in srgb, var(--ground) 90%, transparent);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--panel-edge);
+    padding: 8px 0 10px; margin-bottom: 14px;
+  }
+  .lb-score { font-family: var(--serif); font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .lb-unit { font-size: 13px; color: var(--muted); font-family: var(--sans); margin-left: 6px; }
+  .lb-delta { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 3ch; }
+  .lb-delta.plus { color: var(--good); }
+  .lb-delta.minus { color: var(--bad); }
+  @media (prefers-reduced-motion: no-preference) {
+    .lb-delta.pop { animation: pop .3s ease; }
+    @keyframes pop { 0% { transform: scale(1.6); } 100% { transform: scale(1); } }
+  }
+  .lb-round {
+    align-self: center; font-size: 12px; font-weight: 600;
+    color: var(--muted); background: var(--panel);
+    border: 1px solid var(--panel-edge); border-radius: 6px;
+    padding: 4px 9px; white-space: nowrap;
+  }
+  .lb-round.final { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: var(--warn-bg); }
+  .lb-undo {
+    margin-left: auto; align-self: center;
+    font: 600 14px var(--sans); color: var(--accent-ink);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--panel-edge));
+    border-radius: 8px; padding: 8px 12px; cursor: pointer;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .lb-undo:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .lb-undo:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .lb-undo:disabled { opacity: .4; cursor: default; }
+
+  main { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+
+  /* ---------- Board ---------- */
+  .board-card {
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 12px;
+    padding: 16px;
+    flex: 0 0 auto;
+    width: 360px; max-width: 100%;
+  }
+  .board {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+  }
+  .cell {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 4px;
+    border: 1px solid color-mix(in srgb, var(--tc) 40%, var(--panel-edge));
+    background: color-mix(in srgb, var(--tc) 15%, var(--cell-ground));
+    box-shadow: inset 0 1px 3px rgba(0,0,0,.14);
+    cursor: pointer;
+    position: relative;
+    padding: 0;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .cell::after {
+    content: "";
+    position: absolute; inset: 26%;
+    transform: rotate(45deg);
+    border: 2px solid color-mix(in srgb, var(--tc) 45%, transparent);
+    border-radius: 2px;
+    opacity: .8;
+  }
+  .cell[aria-pressed="true"] {
+    background:
+      radial-gradient(circle at 30% 24%, rgba(255,255,255,.38), rgba(255,255,255,0) 55%),
+      linear-gradient(160deg, color-mix(in srgb, var(--tc) 92%, white) 0%, var(--tc) 55%, color-mix(in srgb, var(--tc) 82%, black) 100%);
+    border-color: color-mix(in srgb, var(--tc) 60%, black);
+    box-shadow: var(--tile-shadow);
+  }
+  .cell[aria-pressed="true"]::after {
+    border-color: var(--mc);
+    opacity: 1;
+  }
+  .cell.last { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .cell.rowlock[aria-pressed="false"] { opacity: .38; cursor: not-allowed; }
+  .gameover .cell { cursor: default; }
+  @media (prefers-reduced-motion: no-preference) {
+    .cell { transition: transform .1s ease, box-shadow .15s ease, opacity .15s ease; }
+    .cell:hover { transform: translateY(-1px); }
+    .cell[aria-pressed="true"]:hover { transform: translateY(-2px); }
+    .cell.rowlock[aria-pressed="false"]:hover, .gameover .cell:hover { transform: none; }
+  }
+  .cell:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  .c0 { --tc: #2b5ea7; --mc: rgba(255,255,255,.55); }
+  .c1 { --tc: #e0ab33; --mc: rgba(140,80,8,.5);   }
+  .c2 { --tc: #b23a2b; --mc: rgba(255,255,255,.5); }
+  .c3 { --tc: #4a4750; --mc: rgba(255,255,255,.4); }
+  .c4 { --tc: #8fcac2; --mc: rgba(19,98,92,.55);  }
+
+  .board-tools {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-top: 14px;
+  }
+  .board-tools .count { color: var(--muted); font-size: 14px; margin-right: auto; font-variant-numeric: tabular-nums; }
+  .board-tools button {
+    font: 600 14px var(--sans);
+    color: var(--accent-ink);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--panel-edge));
+    border-radius: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .board-tools button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .board-tools button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- Live controls: floor + end round ---------- */
+  .live-controls { margin-top: 14px; }
+  .floor-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .floor-head .lbl { color: var(--muted); font-size: 14px; }
+  .floor-pen { margin-left: auto; font-weight: 700; font-size: 15px; color: var(--bad); font-variant-numeric: tabular-nums; }
+  .floor { display: flex; gap: 6px; }
+  .fslot {
+    flex: 1; aspect-ratio: 1; min-width: 0;
+    border-radius: 4px;
+    border: 1px dashed color-mix(in srgb, var(--bad) 45%, var(--panel-edge));
+    background: transparent;
+    color: var(--muted);
+    font: 600 12px var(--sans); font-variant-numeric: tabular-nums;
+    cursor: pointer;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    padding: 0;
+  }
+  .fslot.filled {
+    border-style: solid;
+    background: linear-gradient(160deg, color-mix(in srgb, var(--bad) 88%, white) 0%, var(--bad) 60%, color-mix(in srgb, var(--bad) 80%, black) 100%);
+    color: #fff;
+    box-shadow: var(--tile-shadow);
+  }
+  .fslot:focus-visible { outline: 3px solid var(--bad); outline-offset: 2px; }
+  .floor-note { color: var(--muted); font-size: 12px; margin-top: 7px; }
+  .endround {
+    width: 100%; margin-top: 12px;
+    font: 600 15px var(--sans);
+    color: var(--on-accent); background: var(--accent);
+    border: none; border-radius: 9px;
+    padding: 12px; cursor: pointer;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .endround:hover { background: color-mix(in srgb, var(--accent) 88%, black); }
+  .endround:focus-visible { outline: 3px solid var(--accent-ink); outline-offset: 2px; }
+  .endround:disabled { opacity: .45; cursor: default; }
+
+  /* ---------- Results panel ---------- */
+  .panel { flex: 1 1 300px; min-width: 280px; display: flex; flex-direction: column; gap: 18px; }
+  .panel-sec { display: flex; flex-direction: column; gap: 18px; }
+
+  .range-label { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .range {
+    font-family: var(--serif);
+    font-size: clamp(38px, 7vw, 52px);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+  .range .dash { color: var(--muted); padding: 0 .1em; }
+  .range .unit { font-size: .38em; color: var(--muted); font-family: var(--sans); margin-left: .4em; }
+  .status { font-size: 13px; color: var(--muted); min-height: 1.2em; font-variant-numeric: tabular-nums; }
+  .progress {
+    height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--accent) 18%, transparent);
+    overflow: hidden; margin-top: 6px;
+  }
+  .progress .bar { height: 100%; width: 0%; background: var(--accent); border-radius: 2px; }
+
+  table.breakdown { border-collapse: collapse; width: 100%; font-size: 14px; }
+  table.breakdown td { padding: 7px 0; border-bottom: 1px solid var(--panel-edge); }
+  table.breakdown td:last-child { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  table.breakdown .mut { color: var(--muted); font-weight: 400; }
+  table.breakdown tr.total td { border-bottom: none; font-weight: 700; }
+  table.breakdown tr.total td:first-child { font-weight: 600; }
+
+  .claim { display: flex; align-items: center; gap: 12px; }
+  .claim label { font-weight: 600; font-size: 14px; }
+  .claim input {
+    font: 600 18px var(--sans); font-variant-numeric: tabular-nums;
+    color: var(--ink); background: var(--panel);
+    border: 1px solid var(--panel-edge); border-radius: 8px;
+    padding: 8px 12px; width: 90px;
+  }
+  .claim input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+
+  .verdict {
+    border-radius: 10px; padding: 12px 14px;
+    font-size: 14px; font-weight: 500;
+    border: 1px solid transparent;
+  }
+  .verdict.good { background: var(--good-bg); color: var(--good); border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+  .verdict.warn { background: var(--warn-bg); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+  .verdict.bad  { background: var(--bad-bg);  color: var(--bad);  border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
+
+  .endflag {
+    border-radius: 10px; padding: 10px 14px;
+    font-size: 14px; font-weight: 600;
+    background: var(--warn-bg); color: var(--warn);
+    border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+  }
+
+  .gameover-card {
+    border-radius: 12px; padding: 16px;
+    background: var(--good-bg);
+    border: 1px solid color-mix(in srgb, var(--good) 30%, transparent);
+  }
+  .gameover-card .go-title { font-weight: 700; color: var(--good); font-size: 15px; margin-bottom: 4px; }
+  .gameover-card .go-score { font-family: var(--serif); font-size: 42px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+  .gameover-card .go-unit { font-size: 15px; font-family: var(--sans); color: var(--muted); margin-left: 6px; }
+  .gameover-card .go-detail { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+  .hist-label { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .history { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+  .hrow {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 8px;
+    padding: 7px 12px; font-size: 14px;
+  }
+  .hrow .num { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 2.4ch; }
+  .hrow .chip { width: 15px; height: 15px; border-radius: 3px; background: var(--tc); flex: 0 0 auto; box-shadow: inset 0 0 0 1px rgba(0,0,0,.2); }
+  .hrow .pts { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--good); }
+  .hrow.pen .pts { color: var(--bad); }
+  .hrow.roundend {
+    background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--panel-edge));
+    font-weight: 600;
+  }
+  .hrow.roundend .pts { color: var(--ink); }
+  .hist-empty { color: var(--muted); font-size: 14px; }
+
+  .newgame {
+    align-self: flex-start;
+    font: 600 14px var(--sans); color: var(--bad);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--panel-edge));
+    border-radius: 8px; padding: 8px 14px; cursor: pointer;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .newgame:hover { background: color-mix(in srgb, var(--bad) 8%, transparent); }
+  .newgame:focus-visible { outline: 3px solid var(--bad); outline-offset: 2px; }
+
+  .note { font-size: 13px; color: var(--muted); max-width: 52ch; margin: 0; }
+
+  /* ---------- Rules page ---------- */
+  .rules-page { display: flex; flex-direction: column; gap: 20px; max-width: 72ch; }
+  .rules-page section + section { border-top: 1px solid var(--panel-edge); padding-top: 18px; }
+  .rules-page .phase {
+    font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600;
+  }
+  .rules-page h2 {
+    font-family: var(--serif); font-weight: 600; font-size: 20px;
+    margin: 0 0 8px; text-wrap: balance;
+  }
+  .rules-page p { margin: 0 0 8px; font-size: 15px; }
+  .rules-page p:last-child { margin-bottom: 0; }
+  .rules-page ul { margin: 0 0 8px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
+  .rules-page ul:last-child { margin-bottom: 0; }
+  .rules-page strong { color: var(--accent-ink); }
+  .rules-page table { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .rules-page th, .rules-page td { border: 1px solid var(--panel-edge); padding: 4px 9px; text-align: center; }
+  .rules-page th { color: var(--muted); font-weight: 600; }
+  .rules-scroll { overflow-x: auto; margin-bottom: 8px; }
+  .color-legend { display: flex; gap: 14px; flex-wrap: wrap; }
+  .color-legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
+  .color-legend i { width: 16px; height: 16px; border-radius: 3px; background: var(--tc); box-shadow: inset 0 0 0 1px rgba(0,0,0,.2); }
+
+  /* ---------- Toast ---------- */
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    background: var(--ink); color: var(--ground);
+    padding: 11px 16px; border-radius: 10px;
+    font-size: 14px; font-weight: 500;
+    max-width: min(90vw, 420px); text-align: center;
+    z-index: 20;
+    opacity: 0; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+  @media (prefers-reduced-motion: no-preference) {
+    .toast { transition: opacity .2s ease; }
+  }
+
+  /* ---------- iPhone / narrow screens ---------- */
+  @media (max-width: 720px) {
+    body { padding: 16px 14px 48px; }
+    header.top { margin-bottom: 14px; }
+    .sub { font-size: 14px; }
+    main { gap: 18px; }
+    .board-card { width: 100%; padding: 12px; }
+    .board { gap: 7px; }
+    .lb-score { font-size: 30px; }
+    .tabs { display: flex; width: 100%; }
+    .tab { flex: 1; text-align: center; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">Azul · контроль подсчёта</div>
+    <h1>Сколько очков было возможно?</h1>
+    <p class="sub" id="subVerify">Отметьте плитки так, как они стояли на стене игрока в конце партии. Расчёт переберёт все допустимые порядки выкладки и покажет точный минимум и максимум итогового счёта.</p>
+    <p class="sub" id="subLive" hidden>Ведите счёт партии по раундам: отмечайте плитки при выкладке, заполняйте пол и завершайте раунд — штраф применится и пол очистится. Страница сама следит за правилами и закончит партию.</p>
+    <p class="sub" id="subRules" hidden>Полные правила Azul — от подготовки до финального подсчёта. Спорные места, из-за которых чаще всего ссорятся за столом, вынесены отдельно.</p>
+    <div class="tabs" role="tablist" aria-label="Режим">
+      <button class="tab" role="tab" id="tabVerify" aria-selected="true">Проверка счёта</button>
+      <button class="tab" role="tab" id="tabLive" aria-selected="false">Счёт партии</button>
+      <button class="tab" role="tab" id="tabRules" aria-selected="false">Правила игры</button>
+    </div>
+  </header>
+
+  <div class="livebar" id="livebar" hidden>
+    <div class="lb-score"><span id="liveTotal">0</span><span class="lb-unit">очков</span></div>
+    <div class="lb-delta" id="liveDelta" aria-live="polite"></div>
+    <span class="lb-round" id="lbRound">Раунд 1</span>
+    <button type="button" class="lb-undo" id="btnUndo" disabled>↩ Отменить</button>
+  </div>
+
+  <main id="mainRow">
+    <section class="board-card" id="boardCard" aria-label="Стена Азула">
+      <div class="board" id="board"></div>
+      <div class="board-tools" id="toolsVerify">
+        <span class="count" id="tileCount">Плиток: 0</span>
+        <button type="button" id="btnExample">Пример</button>
+        <button type="button" id="btnClear">Очистить</button>
+      </div>
+      <div class="live-controls" id="toolsLive" hidden>
+        <div class="floor-head">
+          <span class="lbl">Пол — плитки штрафа</span>
+          <span class="floor-pen" id="floorPen"></span>
+        </div>
+        <div class="floor" id="floorRow"></div>
+        <div class="floor-note">Жетон первого игрока тоже занимает ячейку пола. Больше 7 плиток — без дополнительного штрафа.</div>
+        <button type="button" class="endround" id="btnEndRound" disabled>Завершить раунд</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <!-- Режим 1: проверка -->
+      <div class="panel-sec" id="panelVerify" aria-label="Результат проверки">
+        <div>
+          <div class="range-label">Диапазон честного счёта</div>
+          <div class="range" id="rangeOut">0<span class="unit">очков</span></div>
+          <div class="status" id="statusOut"></div>
+          <div class="progress" id="progress" hidden><div class="bar" id="progressBar"></div></div>
+        </div>
+
+        <table class="breakdown">
+          <tbody>
+            <tr><td>Очки за выкладку <span class="mut">(мин – макс)</span></td><td id="bdPlace">0</td></tr>
+            <tr><td>Полные ряды <span class="mut" id="bdRowsN">0 × 2</span></td><td id="bdRows">+0</td></tr>
+            <tr><td>Полные столбцы <span class="mut" id="bdColsN">0 × 7</span></td><td id="bdCols">+0</td></tr>
+            <tr><td>Собранные цвета <span class="mut" id="bdColorsN">0 × 10</span></td><td id="bdColors">+0</td></tr>
+          </tbody>
+        </table>
+
+        <div class="claim">
+          <label for="claimIn">Игрок заявил</label>
+          <input type="number" id="claimIn" min="0" max="300" inputmode="numeric" placeholder="очки">
+        </div>
+        <div class="verdict" id="verdict" hidden></div>
+
+        <p class="note">Максимум — жёсткий потолок: больше набрать нельзя ни при каком порядке выкладки, заявка выше — ошибка или мухлёж. Минимум посчитан без штрафов за пол, реальный итог может быть ниже него. Правило конца партии (заполненный ряд закрывается только в финальном раунде) учтено.</p>
+      </div>
+
+      <!-- Режим 2: живой счёт по раундам -->
+      <div class="panel-sec" id="panelLive" aria-label="Текущий счёт" hidden>
+        <div class="gameover-card" id="goCard" hidden>
+          <div class="go-title">🏆 Партия окончена</div>
+          <div class="go-score"><span id="goScore">0</span><span class="go-unit">очков итог</span></div>
+          <div class="go-detail" id="goDetail"></div>
+        </div>
+
+        <div class="endflag" id="endFlag" hidden>🏁 Заполнен ряд — партия закончится с завершением этого раунда</div>
+
+        <table class="breakdown" id="lvTable">
+          <tbody>
+            <tr><td>Счёт после прошлых раундов</td><td id="lvPrev">0</td></tr>
+            <tr><td>Выкладка в раунде <span class="mut" id="lvTilesN"></span></td><td id="lvPlace">+0</td></tr>
+            <tr><td>Пол <span class="mut" id="lvFloorN"></span></td><td id="lvPen">−0</td></tr>
+            <tr class="total"><td>После завершения раунда</td><td id="lvAfter">0</td></tr>
+          </tbody>
+        </table>
+
+        <table class="breakdown" id="lvBonusTable">
+          <tbody>
+            <tr><td>Бонусы сейчас <span class="mut" id="lvBonusN"></span></td><td id="lvBonus">+0</td></tr>
+            <tr class="total"><td>Итог, если партия кончится сейчас</td><td id="lvFinal">0</td></tr>
+          </tbody>
+        </table>
+
+        <div>
+          <div class="hist-label">Журнал партии</div>
+          <div class="history" id="history" style="margin-top:8px;"></div>
+        </div>
+
+        <button type="button" class="newgame" id="btnNewGame">Новая партия</button>
+
+        <p class="note">Плитка при выкладке даёт длину горизонтальной цепочки (от 2) плюс длину вертикальной (от 2); одиночная — 1 очко. За раунд в каждый ряд стены ложится максимум одна плитка — страница это контролирует. Счёт не опускается ниже нуля.</p>
+      </div>
+    </section>
+  </main>
+
+  <article class="rules-page" id="panelRules" hidden>
+    <section>
+      <h2>Суть игры</h2>
+      <p>Azul — игра для 2–4 игроков, в которой вы украшаете стену королевского дворца в Эворе португальскими изразцами-азулежу. Каждый раунд игроки разбирают плитки с фабрик, копят их в линиях узора и в конце раунда переносят на стену, зарабатывая очки за цепочки. Партия длится 5–8 раундов и заканчивается, когда у кого-то заполняется горизонтальный ряд стены.</p>
+      <p>В мешке 100 плиток — по 20 каждого из пяти цветов:</p>
+      <div class="color-legend">
+        <span><i class="c0"></i>синий</span>
+        <span><i class="c1"></i>жёлтый</span>
+        <span><i class="c2"></i>красный</span>
+        <span><i class="c3"></i>чёрный</span>
+        <span><i class="c4"></i>бирюзовый</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>Подготовка</h2>
+      <ul>
+        <li>Выложите фабрики (круглые тарелки) по числу игроков: <strong>2 игрока — 5 фабрик, 3 — 7, 4 — 9</strong>.</li>
+        <li>На каждую фабрику положите по 4 случайные плитки из мешка.</li>
+        <li>Каждый игрок берёт планшет и ставит маркер счёта на 0.</li>
+        <li>Начинающий игрок (по правилам — кто последним был в Португалии) получает жетон первого игрока.</li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="phase">Фаза 1</div>
+      <h2>Набор плиток</h2>
+      <p>Начинающий кладёт жетон первого игрока в центр стола и ходит первым. В свой ход выберите одно из двух:</p>
+      <ul>
+        <li><strong>С фабрики:</strong> возьмите <em>все</em> плитки одного цвета с одной фабрики. Оставшиеся на ней плитки сдвиньте в центр стола.</li>
+        <li><strong>Из центра:</strong> возьмите все плитки одного цвета из центра. Кто первым в раунде берёт из центра, забирает и жетон первого игрока — кладёт его на первую свободную ячейку пола (обычно это −1), зато начнёт следующий раунд.</li>
+      </ul>
+      <p>Взятые плитки положите на <strong>одну</strong> линию узора, заполняя её справа налево. Всё, что не поместилось, — на пол. Ходы идут по кругу, пока не разберут все плитки с фабрик и из центра.</p>
+    </section>
+
+    <section>
+      <h2>Куда можно класть плитки</h2>
+      <ul>
+        <li>В линии узора может лежать только <strong>один цвет</strong> — докладывать можно только его.</li>
+        <li><strong>Нельзя</strong> класть цвет в линию, если в этом ряду стены плитка такого цвета уже стоит.</li>
+        <li>Можно сознательно отправить взятые плитки сразу на пол — иногда это выгоднее, чем портить линии.</li>
+        <li>Если все 7 ячеек пола заняты, лишние плитки уходят в крышку коробки без дополнительного штрафа.</li>
+      </ul>
+    </section>
+
+    <section>
+      <div class="phase">Фаза 2</div>
+      <h2>Выкладка на стену</h2>
+      <p>Каждая <strong>полностью заполненная</strong> линия узора отдаёт одну (правую) плитку в клетку того же цвета своего ряда стены — линии обрабатываются сверху вниз. Остальные плитки линии уходят в коробку. Незаполненные линии остаются на месте до следующего раунда. Отсюда правило: <strong>за раунд в каждый ряд стены ложится максимум одна плитка</strong>.</p>
+      <p>Очки за каждую выложенную плитку начисляются сразу (см. подсчёт ниже). Затем вычитается штраф пола, плитки с пола уходят в коробку, а жетон первого игрока возвращается его владельцу.</p>
+    </section>
+
+    <section>
+      <h2>Подсчёт очков</h2>
+      <p>Выложенная плитка приносит длину своей горизонтальной цепочки (если в ней ≥ 2 плиток) <strong>плюс</strong> длину вертикальной (если ≥ 2). Плитка на стыке считается в обеих цепочках. Одиночная плитка без соседей — 1 очко.</p>
+      <p>Штраф пола по числу плиток (жетон первого игрока считается плиткой):</p>
+      <div class="rules-scroll">
+        <table>
+          <tr><th>Плиток на полу</th><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td><td>6</td><td>7+</td></tr>
+          <tr><th>Штраф</th><td>−1</td><td>−2</td><td>−4</td><td>−6</td><td>−8</td><td>−11</td><td>−14</td></tr>
+        </table>
+      </div>
+      <p>Счёт никогда не опускается ниже 0.</p>
+    </section>
+
+    <section>
+      <h2>Новый раунд</h2>
+      <p>Фабрики снова заполняются по 4 плитки из мешка. Если мешок опустел — пересыпьте в него плитки из крышки коробки. Если плиток всё равно не хватает, начните раунд с тем, что есть. Раунд открывает владелец жетона первого игрока.</p>
+    </section>
+
+    <section>
+      <h2>Конец партии</h2>
+      <p>Партия заканчивается после раунда, в котором хотя бы у одного игрока заполнился горизонтальный ряд стены. Затем каждый добавляет бонусы:</p>
+      <ul>
+        <li>каждый полный горизонтальный ряд — <strong>+2</strong>;</li>
+        <li>каждый полный вертикальный столбец — <strong>+7</strong>;</li>
+        <li>каждый цвет, все 5 плиток которого стоят на стене, — <strong>+10</strong>.</li>
+      </ul>
+      <p>Побеждает игрок с наибольшим счётом. При равенстве — у кого больше полных рядов; если и тут поровну, победа общая.</p>
+    </section>
+
+    <section>
+      <h2>Частые ошибки и споры</h2>
+      <ul>
+        <li>Кладут в линию узора цвет, который уже стоит на стене в этом ряду, — так нельзя.</li>
+        <li>Берут из центра первыми и «забывают» жетон первого игрока — он обязателен и занимает ячейку пола.</li>
+        <li>Выкладывают в один ряд стены две плитки за раунд — по правилам невозможно (вкладка «Счёт партии» это контролирует).</li>
+        <li>Возвращают лишние плитки в мешок или на фабрику — нет, излишки идут только на пол.</li>
+        <li>Уводят счёт в минус штрафами — счёт останавливается на нуле.</li>
+        <li>Забывают финальные бонусы или начисляют их дважды — проверьте итог во вкладке «Проверка счёта».</li>
+      </ul>
+    </section>
+  </article>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const COLOR_NAMES = ['синий', 'жёлтый', 'красный', 'чёрный', 'бирюзовый'];
+  const COLOR_ADJ = ['синяя', 'жёлтая', 'красная', 'чёрная', 'бирюзовая'];
+  const FLOOR_VALUES = [1, 1, 2, 2, 2, 3, 3];
+  const FLOOR_PEN = [0, 1, 2, 4, 6, 8, 11, 14]; // штраф по числу плиток на полу
+  const colorOf = (r, c) => (c - r + 5) % 5;
+  const el = id => document.getElementById(id);
+
+  let mode = 'verify';           // 'verify' | 'live'
+  const filled = new Set();      // режим 1: индексы r*5+c
+
+  // Режим 2: журнал действий партии
+  // {t:'tile', idx, pts} — плитка на стену; {t:'round', floor} — раунд завершён (floor = плиток на полу)
+  let moves = [];
+  const livePlaced = new Set();
+  let floorCount = 0;            // плитки на полу в текущем раунде
+
+  // ---------- Доска ----------
+  const boardEl = el('board');
+  const cellButtons = [];
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 5; c++) {
+      const btn = document.createElement('button');
+      const col = colorOf(r, c);
+      btn.type = 'button';
+      btn.className = 'cell c' + col;
+      btn.setAttribute('aria-pressed', 'false');
+      btn.setAttribute('aria-label', `Ряд ${r + 1}, колонка ${c + 1}, ${COLOR_NAMES[col]}`);
+      btn.addEventListener('click', () => onCell(r, c));
+      boardEl.appendChild(btn);
+      cellButtons.push(btn);
+    }
+  }
+
+  // Очки за постановку плитки (r,c) при выложенном множестве placed
+  function gridScore(placed, r, c) {
+    let h = 1, v = 1;
+    for (let cc = c - 1; cc >= 0 && placed.has(r * 5 + cc); cc--) h++;
+    for (let cc = c + 1; cc < 5 && placed.has(r * 5 + cc); cc++) h++;
+    for (let rr = r - 1; rr >= 0 && placed.has(rr * 5 + c); rr--) v++;
+    for (let rr = r + 1; rr < 5 && placed.has(rr * 5 + c); rr++) v++;
+    let s = 0;
+    if (h > 1) s += h;
+    if (v > 1) s += v;
+    return s === 0 ? 1 : s;
+  }
+
+  function countBonuses(placed) {
+    const rowCnt = [0,0,0,0,0], colCnt = [0,0,0,0,0], colorCnt = [0,0,0,0,0];
+    for (const i of placed) {
+      const r = (i / 5) | 0, c = i % 5;
+      rowCnt[r]++; colCnt[c]++; colorCnt[colorOf(r, c)]++;
+    }
+    const rowsDone = rowCnt.filter(n => n === 5).length;
+    const colsDone = colCnt.filter(n => n === 5).length;
+    const colorsDone = colorCnt.filter(n => n === 5).length;
+    return { rowsDone, colsDone, colorsDone, bonus: rowsDone * 2 + colsDone * 7 + colorsDone * 10 };
+  }
+
+  // ---------- Сохранение состояния (localStorage) ----------
+  const STORE_KEY = 'azul-state-v1';
+
+  function save() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        v: 1,
+        mode,
+        filled: [...filled],
+        moves: moves.map(a => a.t === 'tile' ? { t: 'tile', idx: a.idx } : { t: 'round', floor: a.floor }),
+        floorCount,
+      }));
+    } catch (e) { /* приватный режим или переполнение — работаем без сохранения */ }
+  }
+
+  function load() {
+    try {
+      const d = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+      if (!d || d.v !== 1) return null;
+      if (Array.isArray(d.filled)) {
+        for (const i of d.filled) if (Number.isInteger(i) && i >= 0 && i < 25) filled.add(i);
+      }
+      if (Array.isArray(d.moves)) {
+        // валидируем журнал повтором партии, очки пересчитываем заново
+        const placed = new Set(), rowsUsed = new Set(), rebuilt = [];
+        let ok = true;
+        for (const a of d.moves) {
+          if (a && a.t === 'tile' && Number.isInteger(a.idx) && a.idx >= 0 && a.idx < 25
+              && !placed.has(a.idx) && !rowsUsed.has((a.idx / 5) | 0)) {
+            const r = (a.idx / 5) | 0, c = a.idx % 5;
+            rebuilt.push({ t: 'tile', idx: a.idx, pts: gridScore(placed, r, c) });
+            placed.add(a.idx);
+            rowsUsed.add(r);
+          } else if (a && a.t === 'round' && Number.isInteger(a.floor) && a.floor >= 0 && a.floor <= 7) {
+            rebuilt.push({ t: 'round', floor: a.floor });
+            rowsUsed.clear();
+          } else { ok = false; break; }
+        }
+        if (ok) {
+          moves = rebuilt;
+          for (const i of placed) livePlaced.add(i);
+        }
+      }
+      if (Number.isInteger(d.floorCount) && d.floorCount >= 0 && d.floorCount <= 7) floorCount = d.floorCount;
+      return (d.mode === 'live' || d.mode === 'rules' || d.mode === 'verify') ? d.mode : null;
+    } catch (e) { return null; }
+  }
+
+  // ---------- Режим 2: состояние партии из журнала ----------
+  function computeLive() {
+    let score = 0, round = 1, roundPlace = 0, roundTiles = 0;
+    const rowsUsed = new Set();
+    for (const a of moves) {
+      if (a.t === 'tile') {
+        roundPlace += a.pts; roundTiles++;
+        rowsUsed.add((a.idx / 5) | 0);
+      } else {
+        score = Math.max(0, score + roundPlace - FLOOR_PEN[a.floor]);
+        roundPlace = 0; roundTiles = 0;
+        rowsUsed.clear();
+        round++;
+      }
+    }
+    const bon = countBonuses(livePlaced);
+    const gameOver = moves.length > 0 && moves[moves.length - 1].t === 'round' && bon.rowsDone > 0;
+    return { score, round, roundPlace, roundTiles, rowsUsed, gameOver, ...bon };
+  }
+
+  function renderBoard() {
+    const live = mode === 'live';
+    const active = live ? livePlaced : filled;
+    const st = live ? computeLive() : null;
+    let lastIdx = -1;
+    if (live) {
+      for (let i = moves.length - 1; i >= 0; i--) {
+        if (moves[i].t === 'round') break;
+        if (moves[i].t === 'tile') { lastIdx = moves[i].idx; break; }
+      }
+    }
+    el('boardCard').classList.toggle('gameover', live && st.gameOver);
+    cellButtons.forEach((b, i) => {
+      b.setAttribute('aria-pressed', active.has(i) ? 'true' : 'false');
+      b.classList.toggle('last', i === lastIdx);
+      b.classList.toggle('rowlock', live && !st.gameOver && st.rowsUsed.has((i / 5) | 0));
+    });
+  }
+
+  function onCell(r, c) {
+    const idx = r * 5 + c;
+    if (mode === 'verify') {
+      if (filled.has(idx)) filled.delete(idx); else filled.add(idx);
+      renderBoard();
+      scheduleCompute();
+      return;
+    }
+    const st = computeLive();
+    if (st.gameOver) {
+      toast('Партия окончена. «↩ Отменить» вернёт завершение раунда, «Новая партия» начнёт заново.');
+      return;
+    }
+    if (livePlaced.has(idx)) return;
+    if (st.rowsUsed.has(r)) {
+      toast(`В ряд ${r + 1} в этом раунде уже клали плитку — по правилам в раунде каждый ряд получает максимум одну.`);
+      return;
+    }
+    const pts = gridScore(livePlaced, r, c);
+    livePlaced.add(idx);
+    moves.push({ t: 'tile', idx, pts });
+    renderBoard();
+    renderLive('+' + pts, 'plus');
+  }
+
+  // ---------- Режим 2: интерфейс ----------
+  const liveTotal = el('liveTotal'), liveDelta = el('liveDelta'), btnUndo = el('btnUndo');
+  const lbRound = el('lbRound');
+  const historyEl = el('history');
+
+  // пол: 7 ячеек
+  const floorRow = el('floorRow');
+  const floorSlots = [];
+  FLOOR_VALUES.forEach((val, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'fslot';
+    b.textContent = '−' + val;
+    b.setAttribute('aria-label', `Ячейка пола ${i + 1}, штраф ${val}`);
+    b.addEventListener('click', () => {
+      if (computeLive().gameOver) { toast('Партия окончена — пол больше не заполняется.'); return; }
+      floorCount = floorCount > i ? i : i + 1;
+      renderLive(floorCount ? '−' + FLOOR_PEN[floorCount] : '', floorCount ? 'minus' : '');
+    });
+    floorRow.appendChild(b);
+    floorSlots.push(b);
+  });
+
+  function renderLive(deltaText, deltaClass) {
+    const st = computeLive();
+    const pen = FLOOR_PEN[floorCount];
+    const trackNow = Math.max(0, st.score + st.roundPlace);       // счёт на треке (штраф ещё не применён)
+    const afterRound = Math.max(0, st.score + st.roundPlace - pen);
+    const finalNow = (st.gameOver ? st.score : afterRound) + st.bonus;
+
+    liveTotal.textContent = st.gameOver ? st.score + st.bonus : trackNow;
+    if (deltaText !== undefined) {
+      liveDelta.textContent = deltaText;
+      liveDelta.className = 'lb-delta ' + (deltaClass || '');
+      liveDelta.classList.remove('pop');
+      void liveDelta.offsetWidth;
+      liveDelta.classList.add('pop');
+    }
+    btnUndo.disabled = moves.length === 0;
+
+    lbRound.textContent = st.gameOver ? 'Финиш 🏆' : (st.rowsDone > 0 ? `Раунд ${st.round} 🏁` : `Раунд ${st.round}`);
+    lbRound.classList.toggle('final', !st.gameOver && st.rowsDone > 0);
+
+    // пол
+    floorSlots.forEach((b, i) => b.classList.toggle('filled', i < floorCount));
+    el('floorPen').textContent = floorCount ? `−${pen}` : '';
+    el('btnEndRound').disabled = st.gameOver || (st.roundTiles === 0 && floorCount === 0);
+    el('btnEndRound').textContent = st.gameOver ? 'Партия окончена' : `Завершить раунд ${st.round}`;
+
+    // таблицы
+    el('lvTable').hidden = st.gameOver;
+    el('lvBonusTable').hidden = st.gameOver;
+    el('lvPrev').textContent = st.score;
+    el('lvPlace').textContent = '+' + st.roundPlace;
+    el('lvTilesN').textContent = st.roundTiles ? `(${st.roundTiles} ${plural(st.roundTiles, 'плитка', 'плитки', 'плиток')})` : '';
+    el('lvPen').textContent = '−' + pen;
+    el('lvFloorN').textContent = floorCount ? `(${floorCount} ${plural(floorCount, 'плитка', 'плитки', 'плиток')})` : '';
+    el('lvAfter').textContent = afterRound;
+    el('lvBonus').textContent = '+' + st.bonus;
+    const parts = [];
+    if (st.rowsDone) parts.push(`ряды ${st.rowsDone}×2`);
+    if (st.colsDone) parts.push(`столбцы ${st.colsDone}×7`);
+    if (st.colorsDone) parts.push(`цвета ${st.colorsDone}×10`);
+    el('lvBonusN').textContent = parts.length ? '(' + parts.join(', ') + ')' : '';
+    el('lvFinal').textContent = finalNow;
+
+    el('endFlag').hidden = st.gameOver || st.rowsDone === 0;
+
+    // финал партии
+    el('goCard').hidden = !st.gameOver;
+    if (st.gameOver) {
+      el('goScore').textContent = st.score + st.bonus;
+      const d = [`счёт на треке ${st.score}`];
+      if (st.rowsDone) d.push(`ряды +${st.rowsDone * 2}`);
+      if (st.colsDone) d.push(`столбцы +${st.colsDone * 7}`);
+      if (st.colorsDone) d.push(`цвета +${st.colorsDone * 10}`);
+      el('goDetail').textContent = d.join(' · ');
+    }
+
+    renderHistory();
+    save();
+  }
+
+  function renderHistory() {
+    if (moves.length === 0) {
+      historyEl.innerHTML = '<div class="hist-empty">Пока пусто — отмечайте плитки по мере выкладки.</div>';
+      return;
+    }
+    const rows = [];
+    let n = 0, score = 0, roundPlace = 0, round = 1;
+    for (const a of moves) {
+      if (a.t === 'tile') {
+        n++;
+        roundPlace += a.pts;
+        const r = (a.idx / 5) | 0, c = a.idx % 5, col = colorOf(r, c);
+        rows.push(`<div class="hrow"><span class="num">${n}</span><span class="chip c${col}"></span><span>${COLOR_ADJ[col]} · ряд ${r + 1}, кол. ${c + 1}</span><span class="pts">+${a.pts}</span></div>`);
+      } else {
+        score = Math.max(0, score + roundPlace - FLOOR_PEN[a.floor]);
+        roundPlace = 0;
+        const penTxt = a.floor ? `пол −${FLOOR_PEN[a.floor]}` : 'пол чистый';
+        rows.push(`<div class="hrow roundend"><span>Раунд ${round} завершён · ${penTxt}</span><span class="pts">счёт ${score}</span></div>`);
+        round++;
+      }
+    }
+    rows.reverse();
+    historyEl.innerHTML = rows.join('');
+  }
+
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+    return many;
+  }
+
+  // ---------- Toast ----------
+  const toastEl = el('toast');
+  let toastTimer = null;
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+  }
+
+  // ---------- Кнопки режима 2 ----------
+  btnUndo.addEventListener('click', () => {
+    const a = moves.pop();
+    if (!a) return;
+    if (a.t === 'tile') livePlaced.delete(a.idx);
+    else floorCount = a.floor; // вернуть пол как был перед завершением раунда
+    renderBoard();
+    renderLive('↩', '');
+  });
+
+  el('btnEndRound').addEventListener('click', () => {
+    const st = computeLive();
+    if (st.gameOver) return;
+    const pen = FLOOR_PEN[floorCount];
+    moves.push({ t: 'round', floor: floorCount });
+    floorCount = 0;
+    renderBoard();
+    const after = computeLive();
+    renderLive(after.gameOver ? '🏁' : (pen ? '−' + pen : '✓'), pen ? 'minus' : '');
+    if (after.gameOver) toast('Заполнен ряд — партия окончена, бонусы добавлены.');
+  });
+
+  const btnNewGame = el('btnNewGame');
+  let ngTimer = null;
+  btnNewGame.addEventListener('click', () => {
+    if (btnNewGame.dataset.arm !== '1') {
+      btnNewGame.dataset.arm = '1';
+      btnNewGame.textContent = 'Точно сбросить?';
+      ngTimer = setTimeout(() => {
+        btnNewGame.dataset.arm = '';
+        btnNewGame.textContent = 'Новая партия';
+      }, 2500);
+      return;
+    }
+    clearTimeout(ngTimer);
+    btnNewGame.dataset.arm = '';
+    btnNewGame.textContent = 'Новая партия';
+    moves = [];
+    livePlaced.clear();
+    floorCount = 0;
+    renderBoard();
+    renderLive('', '');
+  });
+
+  // ---------- Переключение режимов ----------
+  const tabVerify = el('tabVerify'), tabLive = el('tabLive'), tabRules = el('tabRules');
+  function setMode(m) {
+    mode = m;
+    const live = m === 'live', verify = m === 'verify', rules = m === 'rules';
+    tabVerify.setAttribute('aria-selected', String(verify));
+    tabLive.setAttribute('aria-selected', String(live));
+    tabRules.setAttribute('aria-selected', String(rules));
+    el('livebar').hidden = !live;
+    el('panelLive').hidden = !live;
+    el('toolsLive').hidden = !live;
+    el('subLive').hidden = !live;
+    el('panelVerify').hidden = !verify;
+    el('toolsVerify').hidden = !verify;
+    el('subVerify').hidden = !verify;
+    el('subRules').hidden = !rules;
+    el('panelRules').hidden = !rules;
+    el('mainRow').hidden = rules;
+    if (!rules) {
+      renderBoard();
+      if (live) renderLive(); else scheduleCompute();
+    }
+    save();
+  }
+  tabVerify.addEventListener('click', () => setMode('verify'));
+  tabLive.addEventListener('click', () => setMode('live'));
+  tabRules.addEventListener('click', () => setMode('rules'));
+
+  // ---------- Режим 1: точный min/max (DP по подмножествам) ----------
+  const rangeOut = el('rangeOut'), statusOut = el('statusOut');
+  const progress = el('progress'), progressBar = el('progressBar');
+  const claimIn = el('claimIn'), verdictEl = el('verdict');
+
+  let lastResult = null;
+  let computeGen = 0;
+  let debounceTimer = null;
+
+  function scheduleCompute() {
+    el('tileCount').textContent = 'Плиток: ' + filled.size;
+    computeGen++;
+    statusOut.textContent = 'Пересчёт…';
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => { recompute(); }, 180);
+    save();
+  }
+
+  async function recompute() {
+    const gen = ++computeGen;
+    const cells = [...filled].sort((a, b) => a - b).map(i => ({ r: (i / 5) | 0, c: i % 5 }));
+    const k = cells.length;
+
+    const { rowsDone, colsDone, colorsDone, bonus } = countBonuses(filled);
+
+    if (k === 0) {
+      finish(gen, 0, 0, 0, rowsDone, colsDone, colorsDone);
+      return;
+    }
+
+    const bitOf = new Map();
+    cells.forEach((cell, i) => bitOf.set(cell.r * 5 + cell.c, i));
+    const DIRS = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+    const chains = cells.map(({ r, c }) => DIRS.map(([dr, dc]) => {
+      const arr = [];
+      let rr = r + dr, cc = c + dc;
+      while (rr >= 0 && rr < 5 && cc >= 0 && cc < 5 && bitOf.has(rr * 5 + cc)) {
+        arr.push(bitOf.get(rr * 5 + cc));
+        rr += dr; cc += dc;
+      }
+      return arr;
+    }));
+
+    function scoreOf(t, S) {
+      const ch = chains[t];
+      let h = 1, v = 1, a, i;
+      a = ch[0]; for (i = 0; i < a.length; i++) { if (S & (1 << a[i])) h++; else break; }
+      a = ch[1]; for (i = 0; i < a.length; i++) { if (S & (1 << a[i])) h++; else break; }
+      a = ch[2]; for (i = 0; i < a.length; i++) { if (S & (1 << a[i])) v++; else break; }
+      a = ch[3]; for (i = 0; i < a.length; i++) { if (S & (1 << a[i])) v++; else break; }
+      let s = 0;
+      if (h > 1) s += h;
+      if (v > 1) s += v;
+      return s === 0 ? 1 : s;
+    }
+
+    const size = 1 << k;
+    const dpMin = new Uint8Array(size);
+    const dpMax = new Uint8Array(size);
+    const big = size > (1 << 20);
+    if (big) { progress.hidden = false; progressBar.style.width = '0%'; statusOut.textContent = 'Считаю…'; }
+
+    const CHUNK = 1 << 18;
+    for (let start = 1; start < size; start += CHUNK) {
+      const end = Math.min(size, start + CHUNK);
+      for (let S = start; S < end; S++) {
+        let mn = 255, mx = 0, rem = S;
+        while (rem) {
+          const b = rem & -rem;
+          rem ^= b;
+          const t = 31 - Math.clz32(b);
+          const prev = S ^ b;
+          const sc = scoreOf(t, prev);
+          const c1 = dpMin[prev] + sc; if (c1 < mn) mn = c1;
+          const c2 = dpMax[prev] + sc; if (c2 > mx) mx = c2;
+        }
+        dpMin[S] = mn; dpMax[S] = mx;
+      }
+      if (big) {
+        progressBar.style.width = ((end / size) * 100).toFixed(1) + '%';
+        statusOut.textContent = 'Считаю… ' + Math.round((end / size) * 100) + '%';
+        await new Promise(res => setTimeout(res, 0));
+        if (gen !== computeGen) return;
+      }
+    }
+
+    // Ограничение конца партии: полный ряд закрывается в финальном раунде
+    const rowsBits = [[], [], [], [], []];
+    cells.forEach((cell, i) => rowsBits[cell.r].push(i));
+    const hasCompleteRow = rowsBits.some(arr => arr.length === 5);
+    const full = size - 1;
+    let placeMin, placeMax;
+
+    if (!hasCompleteRow) {
+      placeMin = dpMin[full];
+      placeMax = dpMax[full];
+    } else {
+      placeMin = Infinity; placeMax = -Infinity;
+      const choice = [];
+      (function rec(r) {
+        if (r === 5) {
+          let fmask = 0;
+          for (const t of choice) if (t >= 0) fmask |= 1 << t;
+          const base = full ^ fmask;
+          let s = 0, m = base;
+          for (const t of choice) if (t >= 0) { s += scoreOf(t, m); m |= 1 << t; }
+          const c1 = dpMin[base] + s; if (c1 < placeMin) placeMin = c1;
+          const c2 = dpMax[base] + s; if (c2 > placeMax) placeMax = c2;
+          return;
+        }
+        const opts = rowsBits[r].length === 5 ? rowsBits[r] : [-1, ...rowsBits[r]];
+        for (const o of opts) { choice.push(o); rec(r + 1); choice.pop(); }
+      })(0);
+    }
+
+    finish(gen, placeMin, placeMax, bonus, rowsDone, colsDone, colorsDone);
+  }
+
+  function finish(gen, placeMin, placeMax, bonus, rowsDone, colsDone, colorsDone) {
+    if (gen !== computeGen) return;
+    progress.hidden = true;
+    statusOut.textContent = '';
+
+    const totalMin = placeMin + bonus;
+    const totalMax = placeMax + bonus;
+    lastResult = { min: totalMin, max: totalMax };
+
+    rangeOut.innerHTML = totalMin === totalMax
+      ? `${totalMin}<span class="unit">очков</span>`
+      : `${totalMin}<span class="dash">–</span>${totalMax}<span class="unit">очков</span>`;
+
+    el('bdPlace').textContent = placeMin === placeMax ? String(placeMin) : `${placeMin} – ${placeMax}`;
+    el('bdRowsN').textContent = `${rowsDone} × 2`;
+    el('bdRows').textContent = '+' + rowsDone * 2;
+    el('bdColsN').textContent = `${colsDone} × 7`;
+    el('bdCols').textContent = '+' + colsDone * 7;
+    el('bdColorsN').textContent = `${colorsDone} × 10`;
+    el('bdColors').textContent = '+' + colorsDone * 10;
+
+    updateVerdict();
+  }
+
+  function updateVerdict() {
+    const raw = claimIn.value.trim();
+    if (raw === '' || lastResult === null) { verdictEl.hidden = true; return; }
+    const C = Number(raw);
+    if (!Number.isFinite(C) || C < 0) { verdictEl.hidden = true; return; }
+    const { min, max } = lastResult;
+    verdictEl.hidden = false;
+    verdictEl.classList.remove('good', 'warn', 'bad');
+    if (C > max) {
+      verdictEl.classList.add('bad');
+      verdictEl.textContent = `Невозможно. С такой стеной больше ${max} очков не набрать даже при идеальном порядке выкладки. Заявлено на ${C - max} больше потолка.`;
+    } else if (C >= min) {
+      verdictEl.classList.add('good');
+      verdictEl.textContent = `Правдоподобно: укладывается в диапазон ${min}–${max} без штрафов.`;
+    } else {
+      verdictEl.classList.add('warn');
+      verdictEl.textContent = `Ниже минимума (${min}). Честно возможно, только если игрок потерял на полу суммарно не меньше ${min - C} очков штрафа.`;
+    }
+  }
+
+  claimIn.addEventListener('input', updateVerdict);
+
+  el('btnClear').addEventListener('click', () => {
+    filled.clear();
+    renderBoard();
+    scheduleCompute();
+  });
+
+  el('btnExample').addEventListener('click', () => {
+    filled.clear();
+    // профиль типичной конечной стены: верхние ряды (короткие линии узора) заполняются плотнее
+    const rowProb = [0.85, 0.8, 0.65, 0.5, 0.35];
+    // в 60% случаев — полный ряд, будто партию закончил этот игрок
+    const completeRow = Math.random() < 0.6 ? (Math.random() * 3) | 0 : -1;
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        if (r === completeRow || Math.random() < rowProb[r]) filled.add(r * 5 + c);
+      }
+    }
+    renderBoard();
+    scheduleCompute();
+  });
+
+  setMode(load() || 'verify');
+})();
+</script>
+
+</body>
+</html>
