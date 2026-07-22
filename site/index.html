@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Azul: правила игры, ведение счёта партии по раундам и проверка итогового счёта — точный минимум и максимум для конфигурации стены.">
+<meta name="description" content="Azul: правила игры, ведение счёта партии по раундам, проверка итогового счёта и партия против бота.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔷</text></svg>">
 <style>
   * { box-sizing: border-box; }
@@ -97,6 +97,14 @@
   }
   .tab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); }
   .tab:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .play-link {
+    display: none; margin-left: 14px; font-size: 14px; font-weight: 600;
+    color: var(--accent-ink); text-decoration: none;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--panel-edge));
+    border-radius: 8px; padding: 8px 14px; vertical-align: middle;
+  }
+  .play-link:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  @media (min-width: 1000px) { .play-link { display: inline-block; } }
 
   /* ---------- Live sticky bar ---------- */
   .livebar {
@@ -417,6 +425,7 @@
       <button class="tab" role="tab" id="tabLive" aria-selected="false">Счёт партии</button>
       <button class="tab" role="tab" id="tabRules" aria-selected="false">Правила игры</button>
     </div>
+    <a class="play-link" href="/play/">🎲 Сыграть против бота →</a>
   </header>
 
   <div class="livebar" id="livebar" hidden>
