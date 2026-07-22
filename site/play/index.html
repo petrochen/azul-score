@@ -41,6 +41,14 @@
     border: 2px solid rgba(255,255,255,.45);
   }
   .tile.c1::after { border-color: rgba(140,80,8,.5); } .tile.c4::after { border-color: rgba(19,98,92,.55); }
+  /* керамика Nano Banana поверх CSS-фолбэка */
+  .tile.c0, .wcell.on.c0 { background: url('assets/tile0.png') center/cover; }
+  .tile.c1, .wcell.on.c1 { background: url('assets/tile1.png') center/cover; }
+  .tile.c2, .wcell.on.c2 { background: url('assets/tile2.png') center/cover; }
+  .tile.c3, .wcell.on.c3 { background: url('assets/tile3.png') center/cover; }
+  .tile.c4, .wcell.on.c4 { background: url('assets/tile4.png') center/cover; }
+  .tile::after { display: none; }
+  .botava { width: 26px; height: 26px; border-radius: 5px; box-shadow: var(--tile-shadow); }
   .token {
     width: var(--ts, 34px); height: var(--ts, 34px); border-radius: 50%; flex: 0 0 auto;
     background: linear-gradient(160deg, #efe6d2, #cbbfa4); border: 1px solid #a2946f;
@@ -73,11 +81,12 @@
     background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 14px; padding: 14px 16px; margin-bottom: 16px;
   }
   .factory {
-    width: 108px; height: 108px; border-radius: 50%;
-    background: radial-gradient(circle at 40% 35%, color-mix(in srgb, var(--panel) 60%, white) 0%, var(--cell-ground) 70%);
-    border: 2px solid var(--panel-edge);
-    display: grid; grid-template-columns: repeat(2, auto); gap: 6px; place-content: center;
+    width: 122px; height: 122px; border-radius: 50%;
+    background: url('assets/plate.png') center/contain no-repeat;
+    display: flex; flex-wrap: wrap; gap: 2px; align-content: center; justify-content: center;
+    padding: 16px; --ts: 24px;
   }
+  .factory .grp { flex-wrap: wrap; justify-content: center; max-width: 56px; gap: 2px; padding: 2px; }
   .factory.empty { opacity: .35; }
   .cpool {
     min-height: 108px; flex: 1; border-radius: 14px; border: 2px dashed var(--panel-edge);
@@ -275,7 +284,7 @@ function renderBoard(p) {
       }
     }
   }
-  let html = `<div class="pb-head"><span class="pb-name">${p === HUMAN ? 'Вы' : 'Бот 🤖'}</span>
+  let html = `<div class="pb-head">${p === BOT ? '<img class="botava" src="assets/avatar.png" alt="">' : ''}<span class="pb-name">${p === HUMAN ? 'Вы' : 'Бот'}</span>
     ${game.startPlayer === p && game.phase === 'draft' ? '<span class="token" style="--ts:20px;width:20px;height:20px;font-size:11px;">1</span>' : ''}
     <span class="pb-score">${pl.score}</span></div>`;
   html += `<div class="pb-grid"><div class="plines">`;
