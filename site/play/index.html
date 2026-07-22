@@ -84,6 +84,8 @@
   .hintbox b { color: var(--warn); }
   .hintbox ul { margin: 6px 0 0; padding-left: 20px; }
   .hintbox li { margin: 3px 0; }
+  .hintbox .strat { margin-top: 9px; padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--warn) 35%, transparent); }
+  .hintbox .strat b { color: var(--accent-ink); }
   a.back { font-size: 13px; color: var(--muted); }
 
   /* supply row */
@@ -509,8 +511,10 @@ el('btnHint').addEventListener('click', async () => {
   const from = mv.source === 'factory' ? `с фабрики ${mv.factory + 1}` : 'из центра';
   const to = mv.dest === 'floor' ? 'на пол' : `в ряд ${mv.dest + 1}`;
   const tips = explainHint(game, mv);
+  const strat = strategyAdvice(game);
   el('hintbox').innerHTML = `<b>💡 Тренер:</b> взять ${n} ${COLOR_PL[mv.color]} ${from} → ${to}` +
-    (tips.length ? `<ul>${tips.map((t) => `<li>${t}</li>`).join('')}</ul>` : '');
+    (tips.length ? `<ul>${tips.map((t) => `<li>${t}</li>`).join('')}</ul>` : '') +
+    (strat.length ? `<div class="strat"><b>🧭 Стратегия на партию:</b><ul>${strat.map((t) => `<li>${t}</li>`).join('')}</ul></div>` : '');
   addLog(`<b>💡 Совет</b>: ${n} ${COLOR_PL[mv.color]} ${from} → ${to}`);
   render();
 });
@@ -570,27 +574,106 @@ function explainHint(s, mv) {
     tips.push(`Возьмёте жетон первого игрока: −1 в этом раунде, зато первый выбор в следующем.`);
   }
 
-  // стратегия позиции
-  for (let c = 0; c < 5; c++) {
-    let cnt = 0;
-    for (let r = 0; r < 5; r++) if (me.wall[r][c]) cnt++;
-    if (cnt === 4) { tips.push(`Стратегия: столбцу ${c + 1} не хватает одной плитки до +7.`); break; }
-  }
-  for (let k = 0; k < 5; k++) {
-    let cnt = 0;
-    for (let r = 0; r < 5; r++) if (me.wall[r][(r + k) % 5]) cnt++;
-    if (cnt === 4) { tips.push(`Стратегия: цвет «${COLOR_NOM[k]}» собран 4/5 — бонус +10 совсем рядом.`); break; }
-  }
-  const rowFill = (pl) => Math.max(...pl.wall.map((row) => row.filter(Boolean).length));
-  if (rowFill(opp) === 4) {
-    tips.push(`⚠ Бот в одной плитке от полного ряда — партия может закончиться, добирайте очки уже сейчас.`);
-  } else if (rowFill(me) === 4) {
-    tips.push(`У вас ряд 4/5: закрыв его, вы завершите партию — делайте это, только если впереди (счёт ${me.score}:${opp.score}).`);
-  }
   const fl = me.floor.reduce((a, b) => a + b, 0) + (me.hasToken ? 1 : 0);
   if (fl >= 3) tips.push(`На полу уже ${fl} — каждый следующий сброс дороже (−2, потом −3).`);
 
-  return tips.slice(0, 5);
+  return tips.slice(0, 4);
+}
+
+// ---------- стратегия на партию (долгосрочный план, не только текущий ход) ----------
+
+// Плитки цвета k, ещё не осевшие на стенах (мешок/сброс/фабрики/центр/линии/полы циркулируют)
+function tilePool(s, k) {
+  let onWalls = 0;
+  for (const pl of s.players) for (let r = 0; r < 5; r++) if (pl.wall[r][(r + k) % 5]) onWalls++;
+  return 20 - onWalls;
+}
+function circulatingNow(s, k) { // видимые прямо сейчас, до конца раунда
+  let n = s.center[k];
+  for (let f = 0; f < 5; f++) n += s.factories[f][k];
+  return n;
+}
+
+// Лучший достижимый столбец для +7: прогресс максимален, остаток дёшев, все цвета ещё в наличии
+function columnPlan(s, me) {
+  const pl = s.players[me];
+  let best = null;
+  for (let c = 0; c < 5; c++) {
+    let filled = 0, cost = 0, feasible = true;
+    const needs = [];
+    for (let r = 0; r < 5; r++) {
+      if (pl.wall[r][c]) { filled++; continue; }
+      const k = (c - r + 5) % 5;
+      const have = pl.lines[r].color === k ? pl.lines[r].count : 0;
+      const need = r + 1 - have;
+      if (tilePool(s, k) < need) { feasible = false; break; }
+      cost += need;
+      needs.push({ r, k });
+    }
+    if (!feasible || filled === 5) continue;
+    const score = filled * 10 - cost;
+    if (!best || score > best.score) best = { c, filled, cost, needs, score };
+  }
+  return best;
+}
+
+// Лучший достижимый цвет для +10
+function colorPlan(s, me) {
+  const pl = s.players[me];
+  let best = null;
+  for (let k = 0; k < 5; k++) {
+    let filled = 0, cost = 0;
+    const needs = [];
+    for (let r = 0; r < 5; r++) {
+      if (pl.wall[r][(r + k) % 5]) { filled++; continue; }
+      const have = pl.lines[r].color === k ? pl.lines[r].count : 0;
+      cost += r + 1 - have;
+      needs.push(r);
+    }
+    if (filled === 5 || tilePool(s, k) < cost) continue;
+    const score = filled * 10 - cost;
+    if (!best || score > best.score) best = { k, filled, cost, needs, score };
+  }
+  return best;
+}
+
+function strategyAdvice(s) {
+  const tips = [];
+  const me = s.players[HUMAN], opp = s.players[BOT];
+
+  const col = columnPlan(s, HUMAN);
+  if (col && col.filled >= 1) {
+    const rows = col.needs.map((n) => `${n.r + 1} (${COLOR_NOM[n.k]})`).join(', ');
+    tips.push(`Ваш лучший путь к +7 — столбец ${col.c + 1}: собрано ${col.filled}/5, осталось закрыть ряды ${rows}, ~${col.cost} плиток.`);
+  }
+  const colr = colorPlan(s, HUMAN);
+  if (colr && colr.filled >= 2) {
+    tips.push(`Бонус +10 за «${COLOR_NOM[colr.k]}» достижим: ${colr.filled}/5, не хватает рядов ${colr.needs.map((r) => r + 1).join(', ')}; таких плиток в обороте ещё ${tilePool(s, colr.k)}.`);
+  }
+
+  // темп партии
+  const rowMax = (pl) => Math.max(...pl.wall.map((row) => row.filter(Boolean).length));
+  const myMax = rowMax(me), oppMax = rowMax(opp);
+  const lead = me.score - opp.score;
+  if (oppMax === 4) {
+    tips.push(`⚠ Бот в одной плитке от полного ряда — партия может кончиться уже в этом раунде: длинные планы рискованны, берите очки сейчас.`);
+  } else if (lead >= 5 && myMax >= 3) {
+    tips.push(`Вы впереди на ${lead} — выгодно ускорять финал: доводите ряд ${me.wall.findIndex((row) => row.filter(Boolean).length === myMax) + 1} и не дайте боту дособрать его бонусы.`);
+  } else if (lead <= -5) {
+    tips.push(`Вы позади на ${-lead} — не торопите конец партии: тяните раунды и добирайте столбец/цвет, ботовская фора тает на бонусах.`);
+  }
+
+  // дефицит ключевого цвета плана в текущем раунде
+  const keyColor = col && col.needs.length ? col.needs[0].k : (colr ? colr.k : null);
+  if (keyColor !== null) {
+    const circ = circulatingNow(s, keyColor);
+    if (circ > 0 && circ <= 4) tips.push(`«${COLOR_NOM[keyColor]}» в этом раунде осталось всего ${circ} — нужный для плана цвет разбирают, берите при возможности.`);
+  }
+
+  if (!tips.length) {
+    tips.push(`Ранняя партия: заведите длинные ряды (4–5) уже сейчас — им нужно несколько раундов, а очки за них выше; быстрые очки добирайте рядами 1–2.`);
+  }
+  return tips.slice(0, 3);
 }
 
 el('pb0').addEventListener('click', (e) => {
