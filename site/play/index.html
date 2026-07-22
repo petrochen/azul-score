@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Azul — партия против бота</title>
+<meta name="description" content="Azul: сыграйте партию 1 на 1 против бота по полным правилам.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎲</text></svg>">
+<style>
+  :root {
+    --ground: #ede4d3; --panel: #f7f1e4; --panel-edge: #d8cdb6; --cell-ground: #e6dcc8;
+    --ink: #322f28; --muted: #7d7563; --accent: #2f5fa8; --accent-ink: #24497f; --on-accent: #fff;
+    --good: #2e6b40; --bad: #a33325; --warn-bg: #f2e8cd; --warn: #8a6114;
+    --tile-shadow: 0 2px 5px rgba(60,45,20,.30), 0 1px 1px rgba(60,45,20,.2);
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: "Avenir Next", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #191d26; --panel: #222735; --panel-edge: #39415455; --cell-ground: #1d222e;
+      --ink: #e7e2d6; --muted: #99a0b1; --accent: #7ba3dd; --accent-ink: #a8c4ec; --on-accent: #14202f;
+      --good: #85c493; --bad: #e28a77; --warn-bg: #362f1c; --warn: #d9ac4f;
+      --tile-shadow: 0 2px 6px rgba(0,0,0,.5), 0 1px 1px rgba(0,0,0,.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans); line-height: 1.4; }
+
+  .c0 { --tc: #2b5ea7; } .c1 { --tc: #e0ab33; } .c2 { --tc: #b23a2b; } .c3 { --tc: #4a4750; } .c4 { --tc: #8fcac2; }
+  .tile {
+    width: var(--ts, 34px); height: var(--ts, 34px); border-radius: 4px; position: relative;
+    background:
+      radial-gradient(circle at 30% 24%, rgba(255,255,255,.38), rgba(255,255,255,0) 55%),
+      linear-gradient(160deg, color-mix(in srgb, var(--tc) 92%, white) 0%, var(--tc) 55%, color-mix(in srgb, var(--tc) 82%, black) 100%);
+    border: 1px solid color-mix(in srgb, var(--tc) 60%, black);
+    box-shadow: var(--tile-shadow);
+    flex: 0 0 auto;
+  }
+  .tile::after {
+    content: ""; position: absolute; inset: 26%; transform: rotate(45deg); border-radius: 2px;
+    border: 2px solid rgba(255,255,255,.45);
+  }
+  .tile.c1::after { border-color: rgba(140,80,8,.5); } .tile.c4::after { border-color: rgba(19,98,92,.55); }
+  .token {
+    width: var(--ts, 34px); height: var(--ts, 34px); border-radius: 50%; flex: 0 0 auto;
+    background: linear-gradient(160deg, #efe6d2, #cbbfa4); border: 1px solid #a2946f;
+    display: flex; align-items: center; justify-content: center;
+    font: 700 15px var(--serif); color: #6b5d38;
+  }
+
+  .stub { display: none; padding: 60px 24px; text-align: center; font-size: 17px; }
+  .stub a { color: var(--accent); }
+  @media (max-width: 999px) { .stub { display: block; } .game { display: none !important; } }
+
+  .game { max-width: 1180px; margin: 0 auto; padding: 18px 24px 48px; }
+  header.top { display: flex; align-items: baseline; gap: 18px; margin-bottom: 14px; flex-wrap: wrap; }
+  .brand { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  .brand a { color: inherit; text-decoration: none; }
+  #status { font-family: var(--serif); font-size: 22px; }
+  #status .think { color: var(--muted); }
+  header.top .sp { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  button.act {
+    font: 600 14px var(--sans); color: var(--accent-ink); background: transparent;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--panel-edge));
+    border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  }
+  button.act:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  a.back { font-size: 13px; color: var(--muted); }
+
+  /* supply row */
+  .supply {
+    display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 14px; padding: 14px 16px; margin-bottom: 16px;
+  }
+  .factory {
+    width: 108px; height: 108px; border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, color-mix(in srgb, var(--panel) 60%, white) 0%, var(--cell-ground) 70%);
+    border: 2px solid var(--panel-edge);
+    display: grid; grid-template-columns: repeat(2, auto); gap: 6px; place-content: center;
+  }
+  .factory.empty { opacity: .35; }
+  .cpool {
+    min-height: 108px; flex: 1; border-radius: 14px; border: 2px dashed var(--panel-edge);
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 12px 14px;
+  }
+  .cpool .lbl { color: var(--muted); font-size: 13px; margin-right: 6px; }
+  .grp { display: flex; gap: 4px; padding: 4px; border-radius: 8px; border: 2px solid transparent; }
+  .grp.pickable { cursor: pointer; }
+  .grp.pickable:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .grp.picked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .grp.bot-took { border-color: var(--bad); }
+
+  /* boards */
+  .boards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  .pboard { background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 14px; padding: 14px 16px; }
+  .pboard.turn { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); }
+  .pb-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .pb-name { font-weight: 700; }
+  .pb-score { margin-left: auto; font-family: var(--serif); font-size: 26px; font-variant-numeric: tabular-nums; }
+  .pb-grid { display: grid; grid-template-columns: auto auto; gap: 6px 14px; justify-content: start; }
+  .plines { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+  .pline { display: flex; gap: 5px; padding: 3px; border-radius: 7px; border: 2px solid transparent; }
+  .pline .slot {
+    width: var(--ts, 34px); height: var(--ts, 34px); border-radius: 4px;
+    border: 1px dashed color-mix(in srgb, var(--muted) 45%, transparent);
+    background: color-mix(in srgb, var(--cell-ground) 70%, transparent);
+  }
+  .pline.legal { border-color: color-mix(in srgb, var(--good) 70%, transparent); cursor: pointer; }
+  .pline.legal:hover { background: color-mix(in srgb, var(--good) 14%, transparent); }
+  .wall { display: flex; flex-direction: column; gap: 5px; }
+  .wrow { display: flex; gap: 5px; }
+  .wcell {
+    width: var(--ts, 34px); height: var(--ts, 34px); border-radius: 4px; position: relative;
+    background: color-mix(in srgb, var(--tc) 14%, var(--cell-ground));
+    border: 1px solid color-mix(in srgb, var(--tc) 38%, var(--panel-edge));
+    box-shadow: inset 0 1px 3px rgba(0,0,0,.12);
+  }
+  .wcell.on {
+    background:
+      radial-gradient(circle at 30% 24%, rgba(255,255,255,.38), rgba(255,255,255,0) 55%),
+      linear-gradient(160deg, color-mix(in srgb, var(--tc) 92%, white) 0%, var(--tc) 55%, color-mix(in srgb, var(--tc) 82%, black) 100%);
+    border-color: color-mix(in srgb, var(--tc) 60%, black);
+    box-shadow: var(--tile-shadow);
+  }
+  .wcell.fresh { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .floorline { display: flex; gap: 5px; margin-top: 12px; padding: 4px; border-radius: 8px; border: 2px solid transparent; align-items: center; }
+  .floorline.legal { border-color: color-mix(in srgb, var(--bad) 55%, transparent); cursor: pointer; }
+  .floorline.legal:hover { background: color-mix(in srgb, var(--bad) 10%, transparent); }
+  .fslot {
+    width: var(--ts, 34px); height: var(--ts, 34px); border-radius: 4px; position: relative;
+    border: 1px dashed color-mix(in srgb, var(--bad) 40%, var(--panel-edge));
+    display: flex; align-items: center; justify-content: center;
+    font: 600 11px var(--sans); color: var(--muted);
+  }
+  .fslot > * { position: absolute; inset: 0; margin: auto; }
+
+  .pboard.compact { --ts: 26px; }
+  .pboard.compact .pb-score { font-size: 22px; }
+
+  /* log */
+  .log { margin-top: 14px; font-size: 13px; color: var(--muted); display: flex; flex-direction: column-reverse; gap: 3px; max-height: 130px; overflow-y: auto; }
+  .log b { color: var(--ink); }
+
+  /* overlay */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(20, 16, 8, .45); z-index: 30;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .sheet {
+    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 16px;
+    padding: 24px 28px; max-width: 520px; width: 100%; max-height: 80vh; overflow-y: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,.35);
+  }
+  .sheet h2 { font-family: var(--serif); margin: 0 0 12px; font-size: 24px; }
+  .sheet table { border-collapse: collapse; width: 100%; font-size: 14px; margin-bottom: 8px; }
+  .sheet td { padding: 5px 0; border-bottom: 1px solid var(--panel-edge); }
+  .sheet td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .sheet .mut { color: var(--muted); }
+  .sheet .pts { color: var(--good); } .sheet .pen { color: var(--bad); }
+  .sheet .go { font-family: var(--serif); font-size: 40px; margin: 6px 0 2px; }
+  .sheet button.act { margin-top: 14px; background: var(--accent); color: var(--on-accent); border: none; padding: 11px 20px; font-size: 15px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="stub">
+  🖥 Игровой стол Azul рассчитан на экран компьютера (от 1000px).<br><br>
+  На телефоне загляните в <a href="/">калькулятор счёта Azul</a>.
+</div>
+
+<div class="game">
+  <header class="top">
+    <div class="brand"><a href="/">AZUL</a> · партия против бота</div>
+    <div id="status"></div>
+    <div class="sp">
+      <a class="back" href="/">калькулятор счёта →</a>
+      <button class="act" id="btnNew">Новая партия</button>
+    </div>
+  </header>
+
+  <section class="supply" id="supply"></section>
+
+  <section class="boards">
+    <div class="pboard" id="pb0"></div>
+    <div class="pboard compact" id="pb1"></div>
+  </section>
+
+  <div class="log" id="log"></div>
+</div>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="sheet" id="sheet"></div>
+</div>
+
+<script type="module">
+import { newGame, legalMoves, applyMove, isDraftOver, resolveRound } from './engine.js';
+import { chooseMove } from './bot.js';
+
+const COLOR_NAMES = ['синюю', 'жёлтую', 'красную', 'чёрную', 'бирюзовую'];
+const COLOR_PL = ['синих', 'жёлтых', 'красных', 'чёрных', 'бирюзовых'];
+const FLOOR_LABELS = ['−1', '−1', '−2', '−2', '−2', '−3', '−3'];
+const HUMAN = 0, BOT = 1;
+const el = (id) => document.getElementById(id);
+
+let game = null;
+let selected = null;      // {source, factory?, color}
+let busy = false;         // ходит бот / открыт оверлей
+let botSeedBase = 1;
+let moveNo = 0;
+let botTook = null;       // подсветка последнего взятия бота: {source, factory?, color}
+let freshCells = [];      // [player, r, c] — свежие плитки на стене после раунда
+const logLines = [];
+
+function startGame() {
+  const seed = (Math.floor(Math.random() * 0xffffffff)) >>> 0;
+  game = newGame(seed, { startPlayer: HUMAN });
+  botSeedBase = (seed ^ 0x9e3779b9) >>> 0;
+  moveNo = 0; selected = null; busy = false; botTook = null; freshCells = [];
+  logLines.length = 0;
+  addLog(`Новая партия (сид ${seed}). Вы ходите первым.`);
+  el('overlay').hidden = true;
+  render();
+}
+
+function addLog(html) {
+  logLines.push(html);
+  const box = el('log');
+  box.innerHTML = logLines.slice(-40).map((s) => `<div>${s}</div>`).join('');
+}
+
+// ---------- рендер ----------
+
+function tileHtml(c, extra = '') { return `<span class="tile c${c} ${extra}"></span>`; }
+
+function grpAttrs(source, f, c) {
+  const pickable = !busy && game.phase === 'draft' && game.current === HUMAN;
+  const isSel = selected && selected.source === source && selected.factory === f && selected.color === c;
+  const isBot = botTook && botTook.source === source && botTook.factory === f && botTook.color === c;
+  return `class="grp ${pickable ? 'pickable' : ''} ${isSel ? 'picked' : ''} ${isBot ? 'bot-took' : ''}"
+          data-src="${source}" ${f !== undefined ? `data-f="${f}"` : ''} data-c="${c}"`;
+}
+
+function renderSupply() {
+  let html = '';
+  for (let f = 0; f < 5; f++) {
+    const total = game.factories[f].reduce((a, b) => a + b, 0);
+    html += `<div class="factory ${total === 0 ? 'empty' : ''}">`;
+    for (let c = 0; c < 5; c++) {
+      const n = game.factories[f][c];
+      if (n > 0) html += `<span ${grpAttrs('factory', f, c)}>${tileHtml(c).repeat(n)}</span>`;
+    }
+    html += `</div>`;
+  }
+  html += `<div class="cpool"><span class="lbl">центр:</span>`;
+  if (game.firstTakenBy === null && game.phase === 'draft') html += `<span class="token">1</span>`;
+  let centerEmpty = true;
+  for (let c = 0; c < 5; c++) {
+    const n = game.center[c];
+    if (n > 0) { centerEmpty = false; html += `<span ${grpAttrs('center', undefined, c)}>${tileHtml(c).repeat(n)}</span>`; }
+  }
+  if (centerEmpty) html += `<span class="lbl">пусто</span>`;
+  html += `</div>`;
+  el('supply').innerHTML = html;
+}
+
+function renderBoard(p) {
+  const pl = game.players[p];
+  const box = el('pb' + p);
+  const legalDests = new Set();
+  if (p === HUMAN && selected && !busy) {
+    for (const m of legalMoves(game)) {
+      if (m.source === selected.source && m.color === selected.color &&
+          (selected.source === 'center' || m.factory === selected.factory)) {
+        legalDests.add(m.dest);
+      }
+    }
+  }
+  let html = `<div class="pb-head"><span class="pb-name">${p === HUMAN ? 'Вы' : 'Бот 🤖'}</span>
+    ${game.startPlayer === p && game.phase === 'draft' ? '<span class="token" style="--ts:20px;width:20px;height:20px;font-size:11px;">1</span>' : ''}
+    <span class="pb-score">${pl.score}</span></div>`;
+  html += `<div class="pb-grid"><div class="plines">`;
+  for (let d = 0; d < 5; d++) {
+    const line = pl.lines[d];
+    html += `<div class="pline ${legalDests.has(d) ? 'legal' : ''}" data-dest="${d}">`;
+    for (let i = d; i >= 0; i--) {
+      html += i < line.count ? tileHtml(line.color) : `<span class="slot"></span>`;
+    }
+    html += `</div>`;
+  }
+  html += `</div><div class="wall">`;
+  for (let r = 0; r < 5; r++) {
+    html += `<div class="wrow">`;
+    for (let c = 0; c < 5; c++) {
+      const k = (c - r + 5) % 5;
+      const fresh = freshCells.some(([fp, fr, fc]) => fp === p && fr === r && fc === c);
+      html += `<span class="wcell c${k} ${pl.wall[r][c] ? 'on' : ''} ${fresh ? 'fresh' : ''}"></span>`;
+    }
+    html += `</div>`;
+  }
+  html += `</div></div>`;
+  // пол
+  const floorItems = [];
+  if (pl.hasToken) floorItems.push(`<span class="token"></span>`);
+  for (let c = 0; c < 5; c++) for (let i = 0; i < pl.floor[c]; i++) floorItems.push(tileHtml(c));
+  html += `<div class="floorline ${legalDests.has('floor') ? 'legal' : ''}" data-dest="floor">`;
+  for (let i = 0; i < 7; i++) {
+    html += `<span class="fslot">${floorItems[i] || FLOOR_LABELS[i]}</span>`;
+  }
+  html += `</div>`;
+  box.innerHTML = html;
+  box.classList.toggle('turn', game.phase === 'draft' && game.current === p && !busy);
+}
+
+function renderStatus() {
+  let t;
+  if (game.phase === 'over') t = 'Партия окончена';
+  else if (busy && game.current === BOT) t = `Раунд ${game.round} · <span class="think">бот думает…</span>`;
+  else if (game.current === HUMAN) t = `Раунд ${game.round} · ваш ход${selected ? ' — выберите ряд' : ''}`;
+  else t = `Раунд ${game.round}`;
+  el('status').innerHTML = t;
+}
+
+function render() {
+  renderSupply();
+  renderBoard(0);
+  renderBoard(1);
+  renderStatus();
+}
+
+// ---------- взаимодействие ----------
+
+el('supply').addEventListener('click', (e) => {
+  const g = e.target.closest('.grp');
+  if (!g || busy || game.phase !== 'draft' || game.current !== HUMAN) return;
+  const src = g.dataset.src;
+  const sel = { source: src, color: Number(g.dataset.c) };
+  if (src === 'factory') sel.factory = Number(g.dataset.f);
+  const same = selected && selected.source === sel.source && selected.factory === sel.factory && selected.color === sel.color;
+  selected = same ? null : sel;
+  render();
+});
+
+el('pb0').addEventListener('click', (e) => {
+  const t = e.target.closest('[data-dest]');
+  if (!t || !selected || busy) return;
+  const dest = t.dataset.dest === 'floor' ? 'floor' : Number(t.dataset.dest);
+  const mv = { ...selected, dest };
+  let next;
+  try { next = applyMove(game, mv); } catch { return; }
+  describeMove('Вы', game, mv);
+  game = next;
+  selected = null; botTook = null; freshCells = [];
+  moveNo++;
+  render();
+  proceed();
+});
+
+el('btnNew').addEventListener('click', () => {
+  if (game && game.phase !== 'over' && !confirmReset()) return;
+  startGame();
+});
+let resetArmed = false;
+function confirmReset() {
+  if (resetArmed) { resetArmed = false; return true; }
+  resetArmed = true;
+  el('btnNew').textContent = 'Точно? Партия пропадёт';
+  setTimeout(() => { resetArmed = false; el('btnNew').textContent = 'Новая партия'; }, 2500);
+  return false;
+}
+
+function describeMove(who, s, mv) {
+  const n = mv.source === 'factory' ? s.factories[mv.factory][mv.color] : s.center[mv.color];
+  const from = mv.source === 'factory' ? `с фабрики ${mv.factory + 1}` : 'из центра';
+  const to = mv.dest === 'floor' ? 'на пол' : `в ряд ${mv.dest + 1}`;
+  addLog(`<b>${who}</b>: ${n} ${COLOR_PL[mv.color]} ${from} → ${to}`);
+}
+
+// ---------- ход игры ----------
+
+function proceed() {
+  if (isDraftOver(game)) { finishRound(); return; }
+  if (game.current === BOT) {
+    busy = true;
+    renderStatus(); renderBoard(0); renderBoard(1);
+    setTimeout(botMove, 700);
+  }
+}
+
+function botMove() {
+  const seed = (botSeedBase + moveNo * 2654435761) >>> 0;
+  const mv = chooseMove(game, { level: 1, seed });
+  describeMove('Бот', game, mv);
+  botTook = { source: mv.source, factory: mv.factory, color: mv.color };
+  game = applyMove(game, mv);
+  moveNo++;
+  busy = false;
+  render();
+  proceed();
+}
+
+function finishRound() {
+  busy = true;
+  const prevRound = game.round;
+  const { state, log } = resolveRound(game);
+  game = state;
+  freshCells = log.placements.map((p) => [p.player, p.row, p.col]);
+  showRoundSheet(prevRound, log);
+  render();
+}
+
+function showRoundSheet(roundNo, log) {
+  const name = (p) => (p === HUMAN ? 'Вы' : 'Бот');
+  let rows = '';
+  for (const pl of log.placements) {
+    rows += `<tr><td>${name(pl.player)}: ${tileHtml(pl.color)} ряд ${pl.row + 1}</td><td class="pts">+${pl.pts}</td></tr>`;
+  }
+  for (const f of log.floors) {
+    if (f.penalty > 0) rows += `<tr><td>${name(f.player)}: пол (${f.tiles})</td><td class="pen">−${f.penalty}</td></tr>`;
+  }
+  if (!rows) rows = `<tr><td class="mut">Никто ничего не выложил</td><td></td></tr>`;
+  let html = `<h2>Раунд ${roundNo} — итоги</h2><table>${rows}</table>`;
+  html += `<table><tr><td>Ваш счёт</td><td>${game.players[0].score - (log.bonuses ? log.bonuses[0].bonus : 0)}</td></tr>
+           <tr><td>Счёт бота</td><td>${game.players[1].score - (log.bonuses ? log.bonuses[1].bonus : 0)}</td></tr></table>`;
+  if (log.gameOver) {
+    const b0 = log.bonuses[0], b1 = log.bonuses[1];
+    const wtxt = log.winner === 'tie' ? 'Ничья!' : log.winner === HUMAN ? '🏆 Вы победили!' : '🤖 Бот победил';
+    html += `<h2 style="margin-top:14px">${wtxt}</h2>
+      <div class="go">${game.players[0].score} : ${game.players[1].score}</div>
+      <table>
+        <tr><td>Ваши бонусы <span class="mut">(ряды ${b0.rows}×2, столбцы ${b0.cols}×7, цвета ${b0.colors}×10)</span></td><td class="pts">+${b0.bonus}</td></tr>
+        <tr><td>Бонусы бота <span class="mut">(ряды ${b1.rows}×2, столбцы ${b1.cols}×7, цвета ${b1.colors}×10)</span></td><td class="pts">+${b1.bonus}</td></tr>
+      </table>
+      <button class="act" id="sheetBtn">Новая партия</button>`;
+  } else {
+    html += `<button class="act" id="sheetBtn">Раунд ${game.round} →</button>`;
+  }
+  el('sheet').innerHTML = html;
+  el('overlay').hidden = false;
+  el('sheetBtn').addEventListener('click', () => {
+    el('overlay').hidden = true;
+    if (game.phase === 'over') { startGame(); return; }
+    busy = false;
+    addLog(`— Раунд ${game.round} —`);
+    render();
+    proceed();
+  });
+}
+
+startGame();
+</script>
+</body>
+</html>
