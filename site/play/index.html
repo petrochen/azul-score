@@ -219,8 +219,8 @@
 </div>
 
 <script type="module">
-import { newGame, legalMoves, applyMove, isDraftOver, resolveRound } from './engine.js';
-import { chooseMove } from './bot.js';
+import { newGame, legalMoves, applyMove, isDraftOver, resolveRound } from './engine.js?v=4';
+import { chooseMove } from './bot.js?v=4';
 
 const COLOR_NAMES = ['синюю', 'жёлтую', 'красную', 'чёрную', 'бирюзовую'];
 const COLOR_PL = ['синих', 'жёлтых', 'красных', 'чёрных', 'бирюзовых'];
@@ -239,13 +239,14 @@ let gameToken = 0;        // защита от запоздалых ответо
 let botWorker = null, reqId = 0;
 const pendingBot = new Map();
 try {
-  botWorker = new Worker(new URL('./bot-worker.js', import.meta.url), { type: 'module' });
+  botWorker = new Worker(new URL('./bot-worker.js?v=4', import.meta.url), { type: 'module' });
   botWorker.onmessage = (e) => {
     const { id, move, error } = e.data;
     const cb = pendingBot.get(id);
     if (!cb) return;
     pendingBot.delete(id);
-    error ? cb.reject(new Error(error.message)) : cb.resolve(move);
+    if (error || !move) cb.reject(new Error(error ? error.message : 'empty move'));
+    else cb.resolve(move);
   };
   botWorker.onerror = () => {
     botWorker = null;
@@ -254,13 +255,22 @@ try {
   };
 } catch { botWorker = null; }
 
+// Никогда не зависаем: воркер → main-thread → уровень 1 → первый легальный ход.
+function botFallback(state, opts) {
+  try { return chooseMove(state, opts); } catch {}
+  try { return chooseMove(state, { ...opts, level: 1 }); } catch {}
+  return legalMoves(state)[0];
+}
 function askBot(state, opts) {
-  if (!botWorker) return Promise.resolve(chooseMove(state, opts));
+  if (!botWorker) return Promise.resolve(botFallback(state, opts));
   return new Promise((resolve, reject) => {
     const id = ++reqId;
     pendingBot.set(id, { resolve, reject });
     botWorker.postMessage({ id, state, opts });
-  }).catch(() => chooseMove(state, opts));
+    setTimeout(() => { // страховка: воркер молчит дольше 8с — считаем его потерянным
+      if (pendingBot.delete(id)) reject(new Error('worker timeout'));
+    }, 8000);
+  }).catch(() => botFallback(state, opts));
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let botTook = null;       // подсветка последнего взятия бота: {source, factory?, color}
@@ -373,6 +383,7 @@ function renderBoard(p) {
 function renderStatus() {
   let t;
   if (game.phase === 'over') t = 'Партия окончена';
+  else if (!el('overlay').hidden) t = `Раунд ${game.round}`;
   else if (busy && game.current === BOT) t = `Раунд ${game.round} · <span class="think">бот думает…</span>`;
   else if (game.current === HUMAN) t = `Раунд ${game.round} · ваш ход${selected ? ' — выберите ряд' : ''}`;
   else t = `Раунд ${game.round}`;
@@ -549,15 +560,24 @@ async function botMove() {
   const level = Number(el('level').value);
   const seed = (botSeedBase + moveNo * 2654435761) >>> 0;
   const token = gameToken;
-  const [mv] = await Promise.all([
-    askBot(game, { level, seed, timeMs: 1000 }),
-    sleep(650), // минимальная пауза, чтобы ход бота читался глазами
-  ]);
-  if (token !== gameToken || game.phase !== 'draft' || game.current !== BOT) return;
-  describeMove('Бот', game, mv);
-  botTook = { source: mv.source, factory: mv.factory, color: mv.color };
-  game = applyMove(game, mv);
-  moveNo++;
+  try {
+    const [mv] = await Promise.all([
+      askBot(game, { level, seed, timeMs: 1000 }),
+      sleep(650), // минимальная пауза, чтобы ход бота читался глазами
+    ]);
+    if (token !== gameToken || game.phase !== 'draft' || game.current !== BOT) return;
+    describeMove('Бот', game, mv);
+    botTook = { source: mv.source, factory: mv.factory, color: mv.color };
+    game = applyMove(game, mv);
+    moveNo++;
+  } catch (e) {
+    // последний рубеж: любой сбой бота не должен замораживать партию
+    if (token !== gameToken || game.phase !== 'draft' || game.current !== BOT) return;
+    const mv = legalMoves(game)[0];
+    addLog(`<b>Бот</b>: сбой ИИ (${e.message}) — сделан запасной ход`);
+    game = applyMove(game, mv);
+    moveNo++;
+  }
   busy = false;
   render();
   proceed();
