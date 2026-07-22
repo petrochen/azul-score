@@ -6,7 +6,7 @@
 // All bot randomness comes from opts.seed via a private mulberry32 stream —
 // State.rngState is never read or touched (chooseMove does not mutate `s`).
 
-import { legalMoves, applyMove, isDraftOver, resolveRound } from './engine.js';
+import { legalMoves, applyMove, isDraftOver, resolveRound } from './engine.js?v=6';
 
 // ---------- level-1 heuristic weights (constants, see FR-4) ----------
 

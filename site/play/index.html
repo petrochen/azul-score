@@ -200,12 +200,12 @@
 <div class="game">
   <header class="top">
     <div class="brand"><a href="/">AZUL</a> · партия против бота</div>
-    <div id="status"></div>
+    <div id="status" aria-live="polite"></div>
     <div class="sp">
       <a class="back" href="/">калькулятор счёта →</a>
       <button class="act" id="btnSound" title="Звук"></button>
       <button class="act" id="btnHint" title="Сильный бот подскажет ваш ход">💡 Подсказка</button>
-      <select class="act" id="level" title="Сила бота">
+      <select class="act" id="level" title="Сила бота" aria-label="Сила бота">
         <option value="1">Бот: лёгкий</option>
         <option value="2" selected>Бот: сильный</option>
       </select>
@@ -226,12 +226,12 @@
 </div>
 
 <div class="overlay" id="overlay" hidden>
-  <div class="sheet" id="sheet"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Итоги"></div>
 </div>
 
 <script type="module">
-import { newGame, legalMoves, applyMove, isDraftOver, resolveRound } from './engine.js?v=5';
-import { chooseMove, _valueOfMove } from './bot.js?v=5';
+import { newGame, legalMoves, applyMove, isDraftOver, resolveRound } from './engine.js?v=6';
+import { chooseMove, _valueOfMove } from './bot.js?v=6';
 
 const COLOR_NAMES = ['синюю', 'жёлтую', 'красную', 'чёрную', 'бирюзовую'];
 const COLOR_PL = ['синих', 'жёлтых', 'красных', 'чёрных', 'бирюзовых'];
@@ -250,7 +250,7 @@ let gameToken = 0;        // защита от запоздалых ответо
 let botWorker = null, reqId = 0;
 const pendingBot = new Map();
 try {
-  botWorker = new Worker(new URL('./bot-worker.js?v=5', import.meta.url), { type: 'module' });
+  botWorker = new Worker(new URL('./bot-worker.js?v=6', import.meta.url), { type: 'module' });
   botWorker.onmessage = (e) => {
     const { id, move, error } = e.data;
     const cb = pendingBot.get(id);
@@ -276,11 +276,14 @@ function askBot(state, opts) {
   if (!botWorker) return Promise.resolve(botFallback(state, opts));
   return new Promise((resolve, reject) => {
     const id = ++reqId;
-    pendingBot.set(id, { resolve, reject });
-    botWorker.postMessage({ id, state, opts });
-    setTimeout(() => { // страховка: воркер молчит дольше 8с — считаем его потерянным
+    const timer = setTimeout(() => { // страховка: воркер молчит дольше 8с — считаем его потерянным
       if (pendingBot.delete(id)) reject(new Error('worker timeout'));
     }, 8000);
+    pendingBot.set(id, {
+      resolve: (m) => { clearTimeout(timer); resolve(m); },
+      reject: (e) => { clearTimeout(timer); reject(e); },
+    });
+    botWorker.postMessage({ id, state, opts });
   }).catch(() => botFallback(state, opts));
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -642,12 +645,13 @@ async function botMove() {
   const level = Number(el('level').value);
   const seed = (botSeedBase + moveNo * 2654435761) >>> 0;
   const token = gameToken;
+  const mn = moveNo; // M2: стейл-вызов после применённого хода отсекается по moveNo
   try {
     const [mv] = await Promise.all([
       askBot(game, { level, seed, timeMs: 1000 }),
       sleep(650), // минимальная пауза, чтобы ход бота читался глазами
     ]);
-    if (token !== gameToken || game.phase !== 'draft' || game.current !== BOT) return;
+    if (token !== gameToken || mn !== moveNo || game.phase !== 'draft' || game.current !== BOT) return;
     describeMove('Бот', game, mv);
     botTook = { source: mv.source, factory: mv.factory, color: mv.color };
     game = applyMove(game, mv);
@@ -655,9 +659,11 @@ async function botMove() {
     Sound.clack(0.35);
   } catch (e) {
     // последний рубеж: любой сбой бота не должен замораживать партию
-    if (token !== gameToken || game.phase !== 'draft' || game.current !== BOT) return;
+    if (token !== gameToken || mn !== moveNo || game.phase !== 'draft' || game.current !== BOT) return;
     const mv = legalMoves(game)[0];
-    addLog(`<b>Бот</b>: сбой ИИ (${e.message}) — сделан запасной ход`);
+    const msg = String(e && e.message || e).replace(/[<>&]/g, '');
+    addLog(`<b>Бот</b>: сбой ИИ (${msg}) — сделан запасной ход`);
+    botTook = null;
     game = applyMove(game, mv);
     moveNo++;
   }
@@ -712,14 +718,15 @@ function showRoundSheet(roundNo, log) {
     Sound.chime(log.winner === HUMAN ? 'win' : log.winner === 'tie' ? 'tie' : 'lose');
     el('btnAnalyze').addEventListener('click', renderAnalysis, { once: true });
   }
-  el('sheetBtn').addEventListener('click', () => {
+  el('sheetBtn').addEventListener('click', (ev) => {
+    ev.target.disabled = true; // M2: защита от двойного клика
     el('overlay').hidden = true;
     if (game.phase === 'over') { startGame(); return; }
     busy = false;
     addLog(`— Раунд ${game.round} —`);
     render();
     proceed();
-  });
+  }, { once: true });
 }
 
 // ---------- пост-разбор партии: каждый ваш ход против выбора L2 ----------

@@ -12,7 +12,7 @@
 // `id` is echoed so the UI can match a response to its request. The wrapper contains no
 // game logic — it only (de)serializes messages and calls chooseMove.
 
-import { chooseMove } from './bot.js';
+import { chooseMove } from './bot.js?v=6';
 
 // Pure, environment-independent message handler. Returns the exact object to post back.
 // Exported so tests can exercise the message contract by calling it directly (FR-5).
