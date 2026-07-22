@@ -183,6 +183,10 @@
     <div id="status"></div>
     <div class="sp">
       <a class="back" href="/">калькулятор счёта →</a>
+      <select class="act" id="level" title="Сила бота">
+        <option value="1">Бот: лёгкий</option>
+        <option value="2" selected>Бот: сильный</option>
+      </select>
       <button class="act" id="btnNew">Новая партия</button>
     </div>
   </header>
@@ -216,6 +220,36 @@ let selected = null;      // {source, factory?, color}
 let busy = false;         // ходит бот / открыт оверлей
 let botSeedBase = 1;
 let moveNo = 0;
+let gameToken = 0;        // защита от запоздалых ответов воркера после «Новой партии»
+
+// бот L2 думает в воркере, чтобы страница не замирала; фолбэк — синхронный вызов
+let botWorker = null, reqId = 0;
+const pendingBot = new Map();
+try {
+  botWorker = new Worker(new URL('./bot-worker.js', import.meta.url), { type: 'module' });
+  botWorker.onmessage = (e) => {
+    const { id, move, error } = e.data;
+    const cb = pendingBot.get(id);
+    if (!cb) return;
+    pendingBot.delete(id);
+    error ? cb.reject(new Error(error.message)) : cb.resolve(move);
+  };
+  botWorker.onerror = () => {
+    botWorker = null;
+    for (const cb of pendingBot.values()) cb.reject(new Error('worker failed'));
+    pendingBot.clear();
+  };
+} catch { botWorker = null; }
+
+function askBot(state, opts) {
+  if (!botWorker) return Promise.resolve(chooseMove(state, opts));
+  return new Promise((resolve, reject) => {
+    const id = ++reqId;
+    pendingBot.set(id, { resolve, reject });
+    botWorker.postMessage({ id, state, opts });
+  }).catch(() => chooseMove(state, opts));
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let botTook = null;       // подсветка последнего взятия бота: {source, factory?, color}
 let freshCells = [];      // [player, r, c] — свежие плитки на стене после раунда
 const logLines = [];
@@ -224,6 +258,7 @@ function startGame() {
   const seed = (Math.floor(Math.random() * 0xffffffff)) >>> 0;
   game = newGame(seed, { startPlayer: HUMAN });
   botSeedBase = (seed ^ 0x9e3779b9) >>> 0;
+  gameToken++;
   moveNo = 0; selected = null; busy = false; botTook = null; freshCells = [];
   logLines.length = 0;
   addLog(`Новая партия (сид ${seed}). Вы ходите первым.`);
@@ -391,13 +426,19 @@ function proceed() {
   if (game.current === BOT) {
     busy = true;
     renderStatus(); renderBoard(0); renderBoard(1);
-    setTimeout(botMove, 700);
+    botMove();
   }
 }
 
-function botMove() {
+async function botMove() {
+  const level = Number(el('level').value);
   const seed = (botSeedBase + moveNo * 2654435761) >>> 0;
-  const mv = chooseMove(game, { level: 1, seed });
+  const token = gameToken;
+  const [mv] = await Promise.all([
+    askBot(game, { level, seed, timeMs: 1000 }),
+    sleep(650), // минимальная пауза, чтобы ход бота читался глазами
+  ]);
+  if (token !== gameToken || game.phase !== 'draft' || game.current !== BOT) return;
   describeMove('Бот', game, mv);
   botTook = { source: mv.source, factory: mv.factory, color: mv.color };
   game = applyMove(game, mv);
