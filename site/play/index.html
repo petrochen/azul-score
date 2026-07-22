@@ -73,6 +73,16 @@
     border-radius: 8px; padding: 8px 14px; cursor: pointer;
   }
   button.act:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  button.act:disabled { opacity: .5; cursor: default; }
+  .grp.hint { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+  .pline.hint, .floorline.hint { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .hintbox {
+    background: var(--warn-bg); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+    border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; font-size: 14px;
+  }
+  .hintbox b { color: var(--warn); }
+  .hintbox ul { margin: 6px 0 0; padding-left: 20px; }
+  .hintbox li { margin: 3px 0; }
   a.back { font-size: 13px; color: var(--muted); }
 
   /* supply row */
@@ -183,6 +193,7 @@
     <div id="status"></div>
     <div class="sp">
       <a class="back" href="/">калькулятор счёта →</a>
+      <button class="act" id="btnHint" title="Сильный бот подскажет ваш ход">💡 Подсказка</button>
       <select class="act" id="level" title="Сила бота">
         <option value="1">Бот: лёгкий</option>
         <option value="2" selected>Бот: сильный</option>
@@ -192,6 +203,8 @@
   </header>
 
   <section class="supply" id="supply"></section>
+
+  <section class="hintbox" id="hintbox" hidden></section>
 
   <section class="boards">
     <div class="pboard" id="pb0"></div>
@@ -251,6 +264,7 @@ function askBot(state, opts) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let botTook = null;       // подсветка последнего взятия бота: {source, factory?, color}
+let hintMove = null;      // подсказка тренера: полный Move для подсветки
 let freshCells = [];      // [player, r, c] — свежие плитки на стене после раунда
 const logLines = [];
 
@@ -259,7 +273,7 @@ function startGame() {
   game = newGame(seed, { startPlayer: HUMAN });
   botSeedBase = (seed ^ 0x9e3779b9) >>> 0;
   gameToken++;
-  moveNo = 0; selected = null; busy = false; botTook = null; freshCells = [];
+  moveNo = 0; selected = null; busy = false; botTook = null; freshCells = []; hintMove = null;
   logLines.length = 0;
   addLog(`Новая партия (сид ${seed}). Вы ходите первым.`);
   el('overlay').hidden = true;
@@ -280,7 +294,8 @@ function grpAttrs(source, f, c) {
   const pickable = !busy && game.phase === 'draft' && game.current === HUMAN;
   const isSel = selected && selected.source === source && selected.factory === f && selected.color === c;
   const isBot = botTook && botTook.source === source && botTook.factory === f && botTook.color === c;
-  return `class="grp ${pickable ? 'pickable' : ''} ${isSel ? 'picked' : ''} ${isBot ? 'bot-took' : ''}"
+  const isHint = hintMove && hintMove.source === source && hintMove.factory === f && hintMove.color === c;
+  return `class="grp ${pickable ? 'pickable' : ''} ${isSel ? 'picked' : ''} ${isBot ? 'bot-took' : ''} ${isHint ? 'hint' : ''}"
           data-src="${source}" ${f !== undefined ? `data-f="${f}"` : ''} data-c="${c}"`;
 }
 
@@ -325,7 +340,7 @@ function renderBoard(p) {
   html += `<div class="pb-grid"><div class="plines">`;
   for (let d = 0; d < 5; d++) {
     const line = pl.lines[d];
-    html += `<div class="pline ${legalDests.has(d) ? 'legal' : ''}" data-dest="${d}">`;
+    html += `<div class="pline ${legalDests.has(d) ? 'legal' : ''} ${p === HUMAN && hintMove && hintMove.dest === d ? 'hint' : ''}" data-dest="${d}">`;
     for (let i = d; i >= 0; i--) {
       html += i < line.count ? tileHtml(line.color) : `<span class="slot"></span>`;
     }
@@ -346,7 +361,7 @@ function renderBoard(p) {
   const floorItems = [];
   if (pl.hasToken) floorItems.push(`<span class="token"></span>`);
   for (let c = 0; c < 5; c++) for (let i = 0; i < pl.floor[c]; i++) floorItems.push(tileHtml(c));
-  html += `<div class="floorline ${legalDests.has('floor') ? 'legal' : ''}" data-dest="floor">`;
+  html += `<div class="floorline ${legalDests.has('floor') ? 'legal' : ''} ${p === HUMAN && hintMove && hintMove.dest === 'floor' ? 'hint' : ''}" data-dest="floor">`;
   for (let i = 0; i < 7; i++) {
     html += `<span class="fslot">${floorItems[i] || FLOOR_LABELS[i]}</span>`;
   }
@@ -369,6 +384,7 @@ function render() {
   renderBoard(0);
   renderBoard(1);
   renderStatus();
+  el('hintbox').hidden = !hintMove;
 }
 
 // ---------- взаимодействие ----------
@@ -381,8 +397,107 @@ el('supply').addEventListener('click', (e) => {
   if (src === 'factory') sel.factory = Number(g.dataset.f);
   const same = selected && selected.source === sel.source && selected.factory === sel.factory && selected.color === sel.color;
   selected = same ? null : sel;
+  hintMove = null;
   render();
 });
+
+el('btnHint').addEventListener('click', async () => {
+  if (busy || !game || game.phase !== 'draft' || game.current !== HUMAN) return;
+  const btn = el('btnHint');
+  btn.disabled = true; btn.textContent = '💡 думаю…';
+  const token = gameToken, mn = moveNo;
+  const mv = await askBot(game, { level: 2, seed: (botSeedBase ^ 0x5bd1e995 ^ moveNo) >>> 0, timeMs: 1000 });
+  btn.disabled = false; btn.textContent = '💡 Подсказка';
+  if (token !== gameToken || mn !== moveNo || game.phase !== 'draft' || game.current !== HUMAN) return;
+  hintMove = mv;
+  selected = null;
+  const n = mv.source === 'factory' ? game.factories[mv.factory][mv.color] : game.center[mv.color];
+  const from = mv.source === 'factory' ? `с фабрики ${mv.factory + 1}` : 'из центра';
+  const to = mv.dest === 'floor' ? 'на пол' : `в ряд ${mv.dest + 1}`;
+  const tips = explainHint(game, mv);
+  el('hintbox').innerHTML = `<b>💡 Тренер:</b> взять ${n} ${COLOR_PL[mv.color]} ${from} → ${to}` +
+    (tips.length ? `<ul>${tips.map((t) => `<li>${t}</li>`).join('')}</ul>` : '');
+  addLog(`<b>💡 Совет</b>: ${n} ${COLOR_PL[mv.color]} ${from} → ${to}`);
+  render();
+});
+
+const COLOR_NOM = ['синий', 'жёлтый', 'красный', 'чёрный', 'бирюзовый'];
+
+// очки, как будто плитка уже стоит на стене в (r,c)
+function hypoScore(wall, r, c) {
+  let h = 1, v = 1;
+  for (let cc = c - 1; cc >= 0 && wall[r][cc]; cc--) h++;
+  for (let cc = c + 1; cc < 5 && wall[r][cc]; cc++) h++;
+  for (let rr = r - 1; rr >= 0 && wall[rr][c]; rr--) v++;
+  for (let rr = r + 1; rr < 5 && wall[rr][c]; rr++) v++;
+  let s = 0;
+  if (h > 1) s += h;
+  if (v > 1) s += v;
+  return s === 0 ? 1 : s;
+}
+
+function explainHint(s, mv) {
+  const tips = [];
+  const me = s.players[HUMAN], opp = s.players[BOT];
+  const n = mv.source === 'factory' ? s.factories[mv.factory][mv.color] : s.center[mv.color];
+
+  // что даёт сам ход
+  if (mv.dest !== 'floor') {
+    const line = me.lines[mv.dest];
+    const cap = mv.dest + 1;
+    const after = Math.min(cap, line.count + n);
+    const overflow = Math.max(0, line.count + n - cap);
+    if (after === cap) {
+      const col = (mv.dest + mv.color) % 5;
+      let t = `Линия ${mv.dest + 1} закроется — плитка встанет на стену и принесёт ~${hypoScore(me.wall, mv.dest, col)} очк.`;
+      let colCnt = 0;
+      for (let rr = 0; rr < 5; rr++) if (me.wall[rr][col]) colCnt++;
+      if (colCnt === 4) t += ' И это пятая плитка столбца: +7!';
+      tips.push(t);
+    } else {
+      tips.push(`Линия ${mv.dest + 1} дозаполнится до ${after}/${cap} — задел на закрытие в следующем раунде.`);
+    }
+    if (overflow > 0) tips.push(`Цена: ${overflow} лишн. плитк. уйдёт на пол.`);
+  } else {
+    tips.push(`Сброс в пол — жертва очков ради позиции (не портить линии и/или не отдать плитки боту).`);
+  }
+
+  // denial: не отдать нужный цвет боту
+  for (let d = 0; d < 5; d++) {
+    const l = opp.lines[d];
+    if (l.color === mv.color && l.count < d + 1) {
+      tips.push(`Заодно лишаете бота: его линия ${d + 1} ждёт этот цвет (${l.count}/${d + 1}).`);
+      break;
+    }
+  }
+
+  // жетон
+  if (mv.source === 'center' && s.firstTakenBy === null) {
+    tips.push(`Возьмёте жетон первого игрока: −1 в этом раунде, зато первый выбор в следующем.`);
+  }
+
+  // стратегия позиции
+  for (let c = 0; c < 5; c++) {
+    let cnt = 0;
+    for (let r = 0; r < 5; r++) if (me.wall[r][c]) cnt++;
+    if (cnt === 4) { tips.push(`Стратегия: столбцу ${c + 1} не хватает одной плитки до +7.`); break; }
+  }
+  for (let k = 0; k < 5; k++) {
+    let cnt = 0;
+    for (let r = 0; r < 5; r++) if (me.wall[r][(r + k) % 5]) cnt++;
+    if (cnt === 4) { tips.push(`Стратегия: цвет «${COLOR_NOM[k]}» собран 4/5 — бонус +10 совсем рядом.`); break; }
+  }
+  const rowFill = (pl) => Math.max(...pl.wall.map((row) => row.filter(Boolean).length));
+  if (rowFill(opp) === 4) {
+    tips.push(`⚠ Бот в одной плитке от полного ряда — партия может закончиться, добирайте очки уже сейчас.`);
+  } else if (rowFill(me) === 4) {
+    tips.push(`У вас ряд 4/5: закрыв его, вы завершите партию — делайте это, только если впереди (счёт ${me.score}:${opp.score}).`);
+  }
+  const fl = me.floor.reduce((a, b) => a + b, 0) + (me.hasToken ? 1 : 0);
+  if (fl >= 3) tips.push(`На полу уже ${fl} — каждый следующий сброс дороже (−2, потом −3).`);
+
+  return tips.slice(0, 5);
+}
 
 el('pb0').addEventListener('click', (e) => {
   const t = e.target.closest('[data-dest]');
@@ -393,7 +508,7 @@ el('pb0').addEventListener('click', (e) => {
   try { next = applyMove(game, mv); } catch { return; }
   describeMove('Вы', game, mv);
   game = next;
-  selected = null; botTook = null; freshCells = [];
+  selected = null; botTook = null; freshCells = []; hintMove = null;
   moveNo++;
   render();
   proceed();
